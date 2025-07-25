@@ -442,7 +442,7 @@ createGameBtn.addEventListener('click', async () => {
     gameOver: false,
     outcomeMessage: '',
   };
-  await setDoc(doc(db, 'games', gameId), gameData);
+  await setDoc(doc(db, 'games', currentGameId), gameData);
   lobbyDiv.style.display = '';
   gameDiv.style.display = 'none';
   lobbyStatus.textContent = `Game created with ID ${gameId}. Share this ID with friends to join.`;
