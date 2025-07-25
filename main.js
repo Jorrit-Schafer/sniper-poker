@@ -1,16 +1,14 @@
 /*
- * Sniper Hold'em client logic
+ * Sniper Hold'em client logic (merged fixes)
  *
- * This script implements the core logic for hosting or joining games and
- * orchestrating a hand of Sniper Hold'em. It uses Firebase for realtime
- * synchronisation of game state across all connected clients. The static
- * website can be hosted on GitHub Pages or any other static hosting and
- * requires no server‑side code beyond your Firebase project. To run this
- * yourself you need to create a Firebase project, enable the Firestore
- * database and allow public read/write access for development, then fill
- * in your configuration below. The Firebase documentation shows that you
- * can import only the SDKs you need via the CDN and initialise your app
- * with your own configuration【926625994547711†L450-L491】.
+ * This file consolidates all of the improvements made during debugging. It
+ * replaces the previous `main (4).js` with a clean filename and includes:
+ *   - Correct fold handling to ensure the right player wins when others fold.
+ *   - Updated betting logic using `hasActed` to prevent extra turns when no
+ *     raise occurs.
+ *   - A dynamic "Check"/"Call" label on the call button.
+ *   - Display of all players’ hole cards at showdown.
+ *   - Persistent display of the game ID and players list in the lobby.
  */
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
@@ -24,9 +22,7 @@ import {
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 
-// TODO: Replace the following with your project's Firebase configuration.
-// You can find these values in your Firebase console under your app settings.
-// See https://firebase.google.com/docs/web/setup for details.
+// Firebase configuration (replace with your project config)
 const firebaseConfig = {
   apiKey: "AIzaSyA7sQscjjawGtWwTLO8S7OMPjWywVRaYfs",
   authDomain: "sniper-hold-em.firebaseapp.com",
@@ -36,7 +32,6 @@ const firebaseConfig = {
   appId: "1:467999048041:web:197d1877c0037536cd3df8"
 };
 
-// Only initialise Firebase if a configuration has been provided.
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -70,7 +65,6 @@ const snipeBtn = document.getElementById('snipeBtn');
 const snipeInput = document.getElementById('snipeInput');
 const submitSnipeBtn = document.getElementById('submitSnipeBtn');
 const messageArea = document.getElementById('messageArea');
-// New UI elements for simplified sniping and display of snipes
 const snipeComboSelect = document.getElementById('snipeComboSelect');
 const snipeHighSelect = document.getElementById('snipeHighSelect');
 const snipesDisplay = document.getElementById('snipesDisplay');
@@ -81,7 +75,7 @@ let myName = null;
 let currentGameId = null;
 let unsubscribe = null;
 
-// Utility: generate a random 4‑letter/number game code
+// Utility: generate a random 5-character game code
 function generateGameCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
@@ -99,27 +93,22 @@ function shuffle(array) {
   }
 }
 
-// Utility: compute next active player's index (skipping folded/eliminated players and those with zero chips).
+// Utility: compute next active player's index
 function nextActiveIndex(players, startIndex) {
   if (!players || players.length === 0) return 0;
   let idx = startIndex;
   do {
     idx = (idx + 1) % players.length;
     const p = players[idx];
-    if (!p.eliminated && p.chips > 0) {
+    if (!p.eliminated && p.chips > 0 && !p.folded) {
       return idx;
     }
   } while (idx !== startIndex);
   return startIndex;
 }
 
-// Utility: evaluate the rank of a 5‑card hand (array of numbers)
-// Returns an array where the first element is the ranking category (higher is better)
-// and subsequent elements are tie breakers (sorted descending). Ranking categories:
-// 7: Four of a Kind, 6: Full House, 5: Straight, 4: Three of a Kind,
-// 3: Two Pair, 2: One Pair, 1: High Card
+// Utility: evaluate the rank of a 5‑card hand
 function evaluateHand(cards) {
-  // Count occurrences
   const counts = {};
   for (const c of cards) {
     counts[c] = (counts[c] || 0) + 1;
@@ -127,12 +116,10 @@ function evaluateHand(cards) {
   const values = Object.keys(counts).map(n => parseInt(n));
   values.sort((a, b) => b - a);
   const countArr = values.map(v => counts[v]);
-  // Sort values by count descending then value descending
   const sorted = values.slice().sort((a, b) => {
     if (counts[b] === counts[a]) return b - a;
     return counts[b] - counts[a];
   });
-  // Determine if straight: 5 distinct values and max - min == 4
   let isStraight = false;
   if (cards.length === 5) {
     const uniqueVals = Array.from(new Set(cards)).sort((a, b) => a - b);
@@ -144,63 +131,54 @@ function evaluateHand(cards) {
       }
     }
   }
-  // Determine ranking
   let rankCategory;
   if (countArr.includes(4)) {
-    rankCategory = 7; // Four of a Kind
+    rankCategory = 7;
   } else if (countArr.includes(3) && countArr.includes(2)) {
-    rankCategory = 6; // Full House
+    rankCategory = 6;
   } else if (isStraight) {
-    rankCategory = 5; // Straight
+    rankCategory = 5;
   } else if (countArr.includes(3)) {
-    rankCategory = 4; // Three of a Kind
+    rankCategory = 4;
   } else if (countArr.filter(c => c === 2).length === 2) {
-    rankCategory = 3; // Two Pair
+    rankCategory = 3;
   } else if (countArr.includes(2)) {
-    rankCategory = 2; // One Pair
+    rankCategory = 2;
   } else {
-    rankCategory = 1; // High Card
+    rankCategory = 1;
   }
-  // Build tie breaker values: start with high card order from sorted counts
   const tieBreakers = [];
   if (rankCategory === 7) {
-    // Four of a Kind: [quad value, kicker]
     const quadVal = sorted.find(v => counts[v] === 4);
     const kicker = sorted.find(v => counts[v] === 1);
     tieBreakers.push(quadVal, kicker);
   } else if (rankCategory === 6) {
-    // Full House: [trip value, pair value]
     const trip = sorted.find(v => counts[v] === 3);
     const pair = sorted.find(v => counts[v] === 2);
     tieBreakers.push(trip, pair);
   } else if (rankCategory === 5) {
-    // Straight: [highest card]
     const highest = Math.max(...cards);
     tieBreakers.push(highest);
   } else if (rankCategory === 4) {
-    // Three of a kind: [trip value, highest kicker, second kicker]
     const tripVal = sorted.find(v => counts[v] === 3);
     const kickers = sorted.filter(v => counts[v] === 1);
     tieBreakers.push(tripVal, ...kickers.slice(0, 2));
   } else if (rankCategory === 3) {
-    // Two Pair: [highest pair, second pair, kicker]
     const pairs = sorted.filter(v => counts[v] === 2);
     const kicker = sorted.find(v => counts[v] === 1);
     tieBreakers.push(pairs[0], pairs[1], kicker);
   } else if (rankCategory === 2) {
-    // One Pair: [pair value, three kickers]
     const pair = sorted.find(v => counts[v] === 2);
     const kickers = sorted.filter(v => counts[v] === 1);
     tieBreakers.push(pair, ...kickers.slice(0, 3));
   } else {
-    // High card: top five cards
     const sortedVals = cards.slice().sort((a, b) => b - a);
     tieBreakers.push(...sortedVals);
   }
   return [rankCategory, ...tieBreakers];
 }
 
-// Compare two ranking arrays; return positive if a > b, negative if a < b, 0 if equal
+// Compare two ranking arrays
 function compareRanks(a, b) {
   const len = Math.max(a.length, b.length);
   for (let i = 0; i < len; i++) {
@@ -211,12 +189,10 @@ function compareRanks(a, b) {
   return 0;
 }
 
-// Determine the best non‑sniped 5‑card hand for a player given community cards and snipes.
+// Determine the best non‑sniped 5‑card hand for a player
 function bestHandForPlayer(player, communityCards, snipes) {
   const cards = [...player.hole, ...communityCards];
-  // All combinations of 5 cards from 6 cards (index combinations of 6 choose 5). There are 6 combinations.
   const combinations = [];
-  // For 6 cards [0,1,2,3,4,5], 6 choose 5 => exclude each index once
   for (let skip = 0; skip < cards.length; skip++) {
     const combo = [];
     for (let i = 0; i < cards.length; i++) {
@@ -228,51 +204,47 @@ function bestHandForPlayer(player, communityCards, snipes) {
   let bestComboStr = null;
   for (const combo of combinations) {
     const sortedStr = combo.slice().sort((a, b) => a - b).join('-');
-    // Evaluate rank for this combo
     const rank = evaluateHand(combo);
-    // Determine if this combo should be skipped due to snipes
-    let skip = false;
+    let skipCombo = false;
     if (snipes && Array.isArray(snipes)) {
       for (const s of snipes) {
         if (!s) continue;
-        // Legacy string snipes target exact 5-card combination
         if (typeof s === 'string') {
           if (s === sortedStr) {
-            skip = true;
+            skipCombo = true;
             break;
           }
         } else if (typeof s === 'object') {
-          // New simplified snipes target hand category and highest relevant value
           const cat = s.category;
           const val = s.value;
           if (cat && val) {
             if (rank[0] === cat && rank[1] === val) {
-              skip = true;
+              skipCombo = true;
               break;
             }
           }
         }
       }
     }
-    if (skip) {
-      continue;
-    }
+    if (skipCombo) continue;
     if (compareRanks(rank, bestRank) > 0) {
       bestRank = rank;
       bestComboStr = sortedStr;
     }
   }
-  // If all combos sniped, bestRank remains [0] indicating invalid hand
   return { rank: bestRank, comboStr: bestComboStr };
 }
 
-// Render lobby UI with list of players if available
+// Render lobby UI
 function renderLobby(game) {
-  if (!game) return;
-  if (!game.players) return;
+  if (!game || !game.players) return;
   const names = game.players.map(p => p.name).join(', ');
-  lobbyStatus.textContent = `Players: ${names}`;
-  // Show start button if current user is host and there are at least 2 players
+  // Show the game ID along with players. Use the global currentGameId if available.
+  if (currentGameId) {
+    lobbyStatus.textContent = `Game ID: ${currentGameId} | Players: ${names}`;
+  } else {
+    lobbyStatus.textContent = `Players: ${names}`;
+  }
   const isHost = (game.creatorId === myPlayerId);
   let startBtn = document.getElementById('startGameBtn');
   if (isHost && game.players.length >= 2 && !game.started) {
@@ -290,24 +262,17 @@ function renderLobby(game) {
   }
 }
 
-// Render game UI from the current game state
+// Render game UI
 function renderGame(game) {
   if (!game) return;
-  // Update top bar
   playerNameSpan.textContent = myName;
   phaseSpan.textContent = game.phase;
   potSpan.textContent = game.pot;
-  // Find my player object
   const myPlayer = game.players.find(p => p.id === myPlayerId);
   if (myPlayer) {
     playerChipsSpan.textContent = myPlayer.chips;
   }
-
-  // Always update the call/check button text based on whether the current player
-  // has already matched the current bet. If the player’s bet is equal to or
-  // exceeds the currentBet, calling is actually checking. Otherwise, the
-  // difference must be paid and the button should read "Call". If it is not
-  // your turn, the text will still reflect the upcoming action.
+  // Update call/check button label based on my bet relative to currentBet
   if (myPlayer) {
     const diffVal = game.currentBet - (myPlayer.bet || 0);
     if (diffVal <= 0) {
@@ -318,7 +283,6 @@ function renderGame(game) {
   } else {
     callBtn.textContent = 'Call';
   }
-  // Render community cards
   communityCardsDiv.innerHTML = '';
   for (let i = 0; i < game.communityCards.length; i++) {
     const cardVal = game.communityCards[i];
@@ -327,7 +291,6 @@ function renderGame(game) {
     cardEl.textContent = cardVal;
     communityCardsDiv.appendChild(cardEl);
   }
-  // Render hole cards
   holeCardsDiv.innerHTML = '';
   if (myPlayer && myPlayer.hole) {
     myPlayer.hole.forEach(val => {
@@ -337,7 +300,6 @@ function renderGame(game) {
       holeCardsDiv.appendChild(c);
     });
   }
-  // Render players area
   playersArea.innerHTML = '';
   game.players.forEach((p, idx) => {
     const div = document.createElement('div');
@@ -348,8 +310,6 @@ function renderGame(game) {
     if (p.folded) {
       div.classList.add('folded');
     }
-    // Build the player info string. During showdown or after a hand has finished,
-    // reveal each player's hole cards to everyone. Otherwise only show chips and bet.
     let infoHtml = `<strong>${p.name}</strong><br>Chips: ${p.chips}<br>Bet: ${p.bet}`;
     if ((game.phase === 'showdown' || game.phase === 'finished') && p.hole && p.hole.length === 2) {
       const holeStr = p.hole.join(' ');
@@ -358,30 +318,20 @@ function renderGame(game) {
     div.innerHTML = infoHtml;
     playersArea.appendChild(div);
   });
-  // Clear message area
   messageArea.textContent = '';
-  // Clear snipes display
   if (snipesDisplay) snipesDisplay.textContent = '';
-  // Determine available actions
-  // Disable all by default
   callBtn.disabled = true;
   raiseBtn.disabled = true;
   raiseAmountInput.disabled = true;
   foldBtn.disabled = true;
   snipeBtn.style.display = 'none';
   snipeInput.style.display = 'none';
-  // Hide simplified snipe selects by default
   if (snipeComboSelect) snipeComboSelect.style.display = 'none';
   if (snipeHighSelect) snipeHighSelect.style.display = 'none';
   submitSnipeBtn.style.display = 'none';
-  // Only if game has started and not finished
   if (game.phase === 'preflop' || game.phase === 'flop' || game.phase === 'turn') {
-    // It's my turn if I'm the current player and I'm not folded
     if (game.players[game.currentPlayerIndex] && game.players[game.currentPlayerIndex].id === myPlayerId) {
       if (!myPlayer.folded) {
-        // Determine whether the action is a call or a check. If the player has already
-        // matched the current bet (diff <= 0), this should be labelled as a "Check".
-        // Otherwise, it is a "Call" for the remaining difference.
         callBtn.disabled = false;
         if (myPlayer) {
           const diff = game.currentBet - (myPlayer.bet || 0);
@@ -390,17 +340,13 @@ function renderGame(game) {
           } else {
             callBtn.textContent = 'Call';
           }
-        } else {
-          callBtn.textContent = 'Call';
         }
         raiseBtn.disabled = false;
         raiseAmountInput.disabled = false;
         foldBtn.disabled = false;
-        // Limit maximum raise to the smallest stack among active players
         const active = game.players.filter(p => !p.folded && !p.eliminated);
         if (active.length > 0) {
           const minChips = Math.min(...active.map(p => p.chips));
-          // Set max attribute for raise input to prevent raising beyond smallest stack
           raiseAmountInput.max = minChips;
           if (parseInt(raiseAmountInput.value) > minChips) {
             raiseAmountInput.value = minChips;
@@ -409,20 +355,16 @@ function renderGame(game) {
       }
     }
   } else if (game.phase === 'sniping') {
-    // Sniping phase
     if (game.snipes === undefined) game.snipes = [];
-    // Display declared snipes to all players
     if (snipesDisplay) {
       const snipesArr = game.snipes || [];
       if (snipesArr.length === 0) {
         snipesDisplay.textContent = 'No snipes declared yet.';
       } else {
         const descriptions = snipesArr.map(s => {
-          // If s is a string (legacy), show 5-card values
           if (typeof s === 'string') {
             return `5-card hand ${s}`;
           }
-          // Otherwise build readable combination
           const cat = s.category;
           const val = s.value;
           let desc;
@@ -455,28 +397,22 @@ function renderGame(game) {
       }
     }
     if (game.snipingIndex !== undefined && game.players[game.snipingIndex] && game.players[game.snipingIndex].id === myPlayerId) {
-      // show snipe controls
       snipeBtn.style.display = '';
       snipeInput.style.display = 'none';
-      // hide simplified selects initially
       if (snipeComboSelect) snipeComboSelect.style.display = 'none';
       if (snipeHighSelect) snipeHighSelect.style.display = 'none';
       submitSnipeBtn.style.display = 'none';
       snipeBtn.onclick = () => {
         snipeBtn.style.display = 'none';
-        // Show simplified selects
         if (snipeComboSelect) snipeComboSelect.style.display = '';
         if (snipeHighSelect) snipeHighSelect.style.display = '';
         submitSnipeBtn.style.display = '';
       };
       submitSnipeBtn.onclick = async () => {
-        // Determine selection; if both selected, submit simplified snipe
         const catVal = snipeComboSelect ? snipeComboSelect.value : '';
         const highVal = snipeHighSelect ? snipeHighSelect.value : '';
-        // Reset selects
         if (snipeComboSelect) snipeComboSelect.value = '';
         if (snipeHighSelect) snipeHighSelect.value = '';
-        // Hide selects and show button again to avoid repeated display
         if (snipeComboSelect) snipeComboSelect.style.display = 'none';
         if (snipeHighSelect) snipeHighSelect.style.display = 'none';
         submitSnipeBtn.style.display = 'none';
@@ -484,17 +420,14 @@ function renderGame(game) {
         if (catVal && highVal) {
           await submitSnipe({ category: parseInt(catVal), value: parseInt(highVal) });
         } else {
-          // skip or use legacy input (no snipe)
           await submitSnipe('');
         }
       };
     }
   } else if (game.phase === 'showdown' || game.phase === 'finished') {
-    // Show outcome message if available
     if (game.outcomeMessage) {
       messageArea.textContent = game.outcomeMessage;
     }
-    // Provide a button for the host to start next hand if game not over
     if (game.creatorId === myPlayerId && !game.gameOver) {
       let nextBtn = document.getElementById('nextHandBtn');
       if (!nextBtn) {
@@ -521,7 +454,6 @@ async function subscribeToGame(gameId) {
       messageArea.textContent = 'Game no longer exists.';
       return;
     }
-    // Update UI depending on phase
     if (!game.started) {
       renderLobby(game);
     } else {
@@ -531,6 +463,468 @@ async function subscribeToGame(gameId) {
     }
   });
 }
+
+// Host: start a new hand
+async function startHand(game) {
+  if (!db || !game || game.gameOver) return;
+  const docRef = doc(db, 'games', currentGameId);
+  let dealerIndex = game.dealerIndex || 0;
+  if (game.handNumber > 0) {
+    dealerIndex = nextActiveIndex(game.players, dealerIndex);
+  }
+  const activePlayers = game.players.filter(p => !p.eliminated && p.chips > 0);
+  if (activePlayers.length < 2) {
+    await updateDoc(docRef, { gameOver: true, outcomeMessage: `${activePlayers[0].name} wins the game!` });
+    return;
+  }
+  const deck = [];
+  for (let i = 1; i <= 10; i++) {
+    for (let j = 0; j < 4; j++) {
+      deck.push(i);
+    }
+  }
+  shuffle(deck);
+  const players = game.players.map((p) => {
+    const newP = { ...p };
+    if (newP.eliminated || newP.chips <= 0) {
+      newP.eliminated = true;
+      newP.hole = [];
+      newP.bet = 0;
+      newP.folded = true;
+    } else {
+      newP.hole = [deck.pop(), deck.pop()];
+      newP.bet = 0;
+      newP.folded = false;
+    }
+    newP.hasActed = false;
+    return newP;
+  });
+  let smallBlindIdx = nextActiveIndex(players, dealerIndex);
+  let bigBlindIdx = nextActiveIndex(players, smallBlindIdx);
+  let pot = 0;
+  let currentBet = 0;
+  const sbAmount = game.smallBlind || 1;
+  const bbAmount = game.bigBlind || 2;
+  const sbPlayer = players[smallBlindIdx];
+  const bbPlayer = players[bigBlindIdx];
+  const sbPay = Math.min(sbAmount, sbPlayer.chips);
+  sbPlayer.chips -= sbPay;
+  sbPlayer.bet = sbPay;
+  pot += sbPay;
+  const bbPay = Math.min(bbAmount, bbPlayer.chips);
+  bbPlayer.chips -= bbPay;
+  bbPlayer.bet = bbPay;
+  pot += bbPay;
+  currentBet = Math.max(sbPay, bbPay);
+  players.forEach(p => p.hasActed = false);
+  sbPlayer.hasActed = false;
+  bbPlayer.hasActed = false;
+  let lastAggressivePlayerIndex = bigBlindIdx;
+  let currentPlayerIndex = nextActiveIndex(players, bigBlindIdx);
+  const update = {
+    players,
+    dealerIndex,
+    deck,
+    communityCards: [],
+    pot,
+    currentBet,
+    currentPlayerIndex,
+    lastAggressivePlayerIndex,
+    bettingRound: 0,
+    phase: 'preflop',
+    snipes: [],
+    snipingIndex: 0,
+    snipingStartIndex: 0,
+    started: true,
+    handNumber: (game.handNumber || 0) + 1,
+    outcomeMessage: '',
+  };
+  await updateDoc(docRef, update);
+}
+
+// Perform a call action
+async function callAction() {
+  const docRef = doc(db, 'games', currentGameId);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  const idx = game.currentPlayerIndex;
+  const player = game.players[idx];
+  if (player.id !== myPlayerId || player.folded) return;
+  const diff = game.currentBet - player.bet;
+  const pay = Math.min(diff, player.chips);
+  player.chips -= pay;
+  player.bet += pay;
+  game.pot += pay;
+  player.hasActed = true;
+  game.players[idx] = player;
+  const nextIdx = nextActiveIndex(game.players, idx);
+  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+  const allActed = activePlayers.every(p => p.hasActed);
+  if (allActed) {
+    await advanceRound(game);
+  } else {
+    await updateDoc(docRef, {
+      players: game.players,
+      pot: game.pot,
+      currentPlayerIndex: nextIdx,
+    });
+  }
+}
+
+// Perform a raise action
+async function raiseAction(amount) {
+  const raiseAmount = parseInt(amount);
+  if (isNaN(raiseAmount) || raiseAmount <= 0) {
+    messageArea.textContent = 'Invalid raise amount.';
+    return;
+  }
+  const gameSnap = await getDoc(doc(db, 'games', currentGameId));
+  const currentGame = gameSnap.data();
+  const activePlayers = currentGame.players.filter(p => !p.folded && !p.eliminated);
+  if (activePlayers.length > 0) {
+    const minChips = Math.min(...activePlayers.map(p => p.chips));
+    if (raiseAmount > minChips) {
+      messageArea.textContent = `Raise amount exceeds the maximum allowed (${minChips}).`;
+      return;
+    }
+  }
+  const docRef = doc(db, 'games', currentGameId);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  const idx = game.currentPlayerIndex;
+  const player = game.players[idx];
+  if (player.id !== myPlayerId || player.folded) return;
+  const newBet = game.currentBet + raiseAmount;
+  const diff = newBet - player.bet;
+  const pay = Math.min(diff, player.chips);
+  player.chips -= pay;
+  player.bet += pay;
+  game.pot += pay;
+  game.currentBet = player.bet;
+  game.lastAggressivePlayerIndex = idx;
+  game.players.forEach((p) => {
+    if (!p.folded && !p.eliminated) {
+      p.hasActed = (p.id === player.id);
+    }
+  });
+  game.players[idx] = player;
+  const nextIdx = nextActiveIndex(game.players, idx);
+  await updateDoc(docRef, {
+    players: game.players,
+    pot: game.pot,
+    currentBet: game.currentBet,
+    lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+    currentPlayerIndex: nextIdx,
+  });
+}
+
+// Perform a fold action
+async function foldAction() {
+  const docRef = doc(db, 'games', currentGameId);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  const idx = game.currentPlayerIndex;
+  const player = game.players[idx];
+  if (player.id !== myPlayerId) return;
+  player.folded = true;
+  player.hasActed = true;
+  const activeIndices = [];
+  for (let i = 0; i < game.players.length; i++) {
+    const p = game.players[i];
+    if (!p.folded && !p.eliminated) {
+      activeIndices.push(i);
+    }
+  }
+  if (activeIndices.length === 1) {
+    const winnerIdx = activeIndices[0];
+    game.players[winnerIdx].chips += game.pot;
+    game.pot = 0;
+    game.phase = 'finished';
+    game.outcomeMessage = `${game.players[winnerIdx].name} wins ${game.pot} chips (all others folded)`;
+    await updateDoc(docRef, {
+      players: game.players,
+      pot: game.pot,
+      phase: game.phase,
+      outcomeMessage: game.outcomeMessage,
+    });
+    return;
+  }
+  const nextIdx = nextActiveIndex(game.players, idx);
+  if (idx === game.lastAggressivePlayerIndex) {
+    let prev = idx;
+    do {
+      prev = (prev - 1 + game.players.length) % game.players.length;
+      if (!game.players[prev].folded && !game.players[prev].eliminated) break;
+    } while (true);
+    game.lastAggressivePlayerIndex = prev;
+  }
+  game.players[idx] = player;
+  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+  const allActed = activePlayers.every(p => p.hasActed);
+  if (allActed) {
+    await advanceRound(game);
+  } else {
+    await updateDoc(docRef, {
+      players: game.players,
+      currentPlayerIndex: nextIdx,
+      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+    });
+  }
+}
+
+// Advance to next betting round or sniping/showdown
+async function advanceRound(game) {
+  const docRef = doc(db, 'games', currentGameId);
+  game.players.forEach((p) => {
+    p.bet = 0;
+    p.hasActed = false;
+  });
+  if (game.bettingRound === 0) {
+    const deck = game.deck;
+    const card1 = deck.pop();
+    const card2 = deck.pop();
+    game.communityCards.push(card1, card2);
+    game.bettingRound = 1;
+    game.phase = 'flop';
+    game.currentBet = 0;
+    const firstToAct = nextActiveIndex(game.players, game.dealerIndex);
+    game.lastAggressivePlayerIndex = firstToAct;
+    game.currentPlayerIndex = firstToAct;
+    await updateDoc(docRef, {
+      players: game.players,
+      communityCards: game.communityCards,
+      deck: deck,
+      bettingRound: game.bettingRound,
+      phase: game.phase,
+      currentBet: game.currentBet,
+      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+      currentPlayerIndex: game.currentPlayerIndex,
+    });
+  } else if (game.bettingRound === 1) {
+    const deck = game.deck;
+    const card3 = deck.pop();
+    const card4 = deck.pop();
+    game.communityCards.push(card3, card4);
+    game.bettingRound = 2;
+    game.phase = 'turn';
+    game.currentBet = 0;
+    const firstToAct = nextActiveIndex(game.players, game.dealerIndex);
+    game.lastAggressivePlayerIndex = firstToAct;
+    game.currentPlayerIndex = firstToAct;
+    await updateDoc(docRef, {
+      players: game.players,
+      communityCards: game.communityCards,
+      deck: deck,
+      bettingRound: game.bettingRound,
+      phase: game.phase,
+      currentBet: game.currentBet,
+      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+      currentPlayerIndex: game.currentPlayerIndex,
+    });
+  } else if (game.bettingRound === 2) {
+    game.phase = 'sniping';
+    game.snipingStartIndex = game.lastAggressivePlayerIndex;
+    game.snipingIndex = game.lastAggressivePlayerIndex;
+    await updateDoc(docRef, {
+      players: game.players,
+      phase: game.phase,
+      snipingIndex: game.snipingIndex,
+      snipingStartIndex: game.snipingStartIndex,
+    });
+  }
+}
+
+// Submit a snipe declaration
+async function submitSnipe(snipe) {
+  const docRef = doc(db, 'games', currentGameId);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  if (game.phase !== 'sniping') return;
+  if (game.players[game.snipingIndex].id !== myPlayerId) return;
+  const snipes = game.snipes || [];
+  if (snipe) {
+    if (typeof snipe === 'string') {
+      const handStr = snipe;
+      const trimmed = handStr.replace(/\s+/g, '');
+      if (trimmed) {
+        const parts = trimmed.split('-');
+        const numbers = parts.map(x => parseInt(x));
+        if (numbers.length === 5 && numbers.every(n => !isNaN(n) && n >= 1 && n <= 10)) {
+          const sorted = numbers.slice().sort((a, b) => a - b);
+          snipes.push(sorted.join('-'));
+        }
+      }
+    } else if (typeof snipe === 'object') {
+      const cat = snipe.category;
+      const val = snipe.value;
+      if (cat && val) {
+        snipes.push({
+          by: myPlayerId,
+          name: myName,
+          category: parseInt(cat),
+          value: parseInt(val),
+        });
+      }
+    }
+  }
+  let nextIdx = nextActiveIndex(game.players, game.snipingIndex);
+  if (nextIdx === game.snipingStartIndex) {
+    await resolveShowdown(game, snipes);
+  } else {
+    await updateDoc(docRef, {
+      snipes: snipes,
+      snipingIndex: nextIdx,
+    });
+  }
+}
+
+// Resolve showdown
+async function resolveShowdown(game, snipes) {
+  const docRef = doc(db, 'games', currentGameId);
+  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+  const results = [];
+  for (const p of activePlayers) {
+    const { rank, comboStr } = bestHandForPlayer(p, game.communityCards, snipes);
+    results.push({ player: p, rank, comboStr });
+  }
+  let bestRank = [0];
+  results.forEach(res => {
+    if (compareRanks(res.rank, bestRank) > 0) {
+      bestRank = res.rank;
+    }
+  });
+  const winners = results.filter(res => compareRanks(res.rank, bestRank) === 0);
+  const share = Math.floor(game.pot / winners.length);
+  let remainder = game.pot % winners.length;
+  winners.forEach(res => {
+    res.player.chips += share;
+    if (remainder > 0) {
+      res.player.chips += 1;
+      remainder--;
+    }
+  });
+  let outcome;
+  if (winners.length === 1) {
+    outcome = `${winners[0].player.name} wins ${game.pot} chips.`;
+  } else {
+    const names = winners.map(w => w.player.name).join(' and ');
+    outcome = `${names} split the pot of ${game.pot} chips.`;
+  }
+  let snipeSummary = '';
+  if (snipes && snipes.length > 0) {
+    const descs = snipes.map(s => {
+      if (!s) return '';
+      if (typeof s === 'string') {
+        return `5-card hand ${s}`;
+      }
+      const cat = s.category;
+      const val = s.value;
+      let desc;
+      switch (cat) {
+        case 7:
+          desc = `Four of a Kind (${val})`;
+          break;
+        case 6:
+          desc = `Full House (trip ${val})`;
+          break;
+        case 5:
+          desc = `Straight to ${val}`;
+          break;
+        case 4:
+          desc = `Three of a Kind (${val})`;
+          break;
+        case 3:
+          desc = `Two Pair (highest ${val})`;
+          break;
+        case 2:
+          desc = `Pair of ${val}s`;
+          break;
+        default:
+          desc = `High Card ${val}`;
+          break;
+      }
+      return `${desc} by ${s.name}`;
+    }).filter(Boolean);
+    if (descs.length > 0) {
+      snipeSummary = ' Sniped: ' + descs.join(', ') + '.';
+    }
+  }
+  let winningDesc = '';
+  if (bestRank && bestRank[0] > 0) {
+    const cat = bestRank[0];
+    const high = bestRank[1];
+    switch (cat) {
+      case 7:
+        winningDesc = `Four of a Kind (${high})`;
+        break;
+      case 6:
+        winningDesc = `Full House (trip ${high})`;
+        break;
+      case 5:
+        winningDesc = `Straight to ${high}`;
+        break;
+      case 4:
+        winningDesc = `Three of a Kind (${high})`;
+        break;
+      case 3:
+        winningDesc = `Two Pair (highest ${high})`;
+        break;
+      case 2:
+        winningDesc = `Pair of ${high}s`;
+        break;
+      default:
+        winningDesc = `High Card ${high}`;
+        break;
+    }
+    winningDesc = ' Winning combination: ' + winningDesc + '.';
+  }
+  outcome = outcome + snipeSummary + winningDesc;
+  game.pot = 0;
+  const updatedPlayers = game.players.map(p => {
+    const res = winners.find(w => w.player.id === p.id);
+    if (res) {
+      return { ...res.player };
+    }
+    return { ...p };
+  });
+  updatedPlayers.forEach(p => {
+    if (p.chips <= 0) {
+      p.eliminated = true;
+    }
+  });
+  let gameOver = false;
+  let overallWinner = null;
+  updatedPlayers.forEach(p => {
+    if (p.chips >= 75) {
+      gameOver = true;
+      overallWinner = p;
+    }
+  });
+  await updateDoc(docRef, {
+    players: updatedPlayers,
+    pot: game.pot,
+    phase: 'finished',
+    outcomeMessage: outcome,
+    gameOver: gameOver,
+  });
+  if (gameOver && overallWinner) {
+    await updateDoc(docRef, {
+      outcomeMessage: `${overallWinner.name} has reached 75 chips and wins the game!`,
+    });
+  }
+}
+
+// Wire up UI buttons
+callBtn.addEventListener('click', () => {
+  callAction();
+});
+raiseBtn.addEventListener('click', () => {
+  const amount = raiseAmountInput.value;
+  raiseAction(amount);
+});
+foldBtn.addEventListener('click', () => {
+  foldAction();
+});
 
 // Handle create game
 createGameBtn.addEventListener('click', async () => {
@@ -544,12 +938,9 @@ createGameBtn.addEventListener('click', async () => {
     return;
   }
   myName = name;
-  // Create a unique identifier for this player. crypto.randomUUID() is available in
-  // modern browsers; fall back to a random string if unavailable.
   myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : generateGameCode() + Date.now();
   const gameId = generateGameCode();
   currentGameId = gameId;
-  // Create game document with initial fields
   const gameData = {
     creatorId: myPlayerId,
     createdAt: serverTimestamp(),
@@ -620,7 +1011,6 @@ joinGameBtn.addEventListener('click', async () => {
     lobbyStatus.textContent = 'Game is full (max 6 players).';
     return;
   }
-  // Add this player to the players array
   const updatedPlayers = [...game.players, {
     id: myPlayerId,
     name: myName,
@@ -633,542 +1023,4 @@ joinGameBtn.addEventListener('click', async () => {
   await updateDoc(docRef, { players: updatedPlayers });
   lobbyStatus.textContent = `Joined game ${gameId}.`;
   subscribeToGame(gameId);
-});
-
-// Host: start a new hand
-async function startHand(game) {
-  if (!db) return;
-  if (!game || game.gameOver) return;
-  const docRef = doc(db, 'games', currentGameId);
-  // Determine new dealer index (increment previous dealer)
-  let dealerIndex = game.dealerIndex || 0;
-  if (game.handNumber > 0) {
-    // Move dealer to next active
-    dealerIndex = nextActiveIndex(game.players, dealerIndex);
-  }
-  // Filter active players (non‑eliminated with chips)
-  const activePlayers = game.players.filter(p => !p.eliminated && p.chips > 0);
-  // If fewer than 2 active players, game over
-  if (activePlayers.length < 2) {
-    await updateDoc(docRef, { gameOver: true, outcomeMessage: `${activePlayers[0].name} wins the game!` });
-    return;
-  }
-  // Create new deck (1–10 each with four copies)
-  const deck = [];
-  for (let i = 1; i <= 10; i++) {
-    for (let j = 0; j < 4; j++) {
-      deck.push(i);
-    }
-  }
-  shuffle(deck);
-  // Reset players for new hand
-  const players = game.players.map((p) => {
-    const newP = { ...p };
-    if (newP.eliminated || newP.chips <= 0) {
-      newP.eliminated = true;
-      newP.hole = [];
-      newP.bet = 0;
-      newP.folded = true;
-    } else {
-      newP.hole = [deck.pop(), deck.pop()];
-      newP.bet = 0;
-      newP.folded = false;
-    }
-    newP.hasActed = false;
-    return newP;
-  });
-  // Determine small and big blind positions
-  let smallBlindIdx = nextActiveIndex(players, dealerIndex);
-  let bigBlindIdx = nextActiveIndex(players, smallBlindIdx);
-  // Place blinds
-  let pot = 0;
-  let currentBet = 0;
-  const sbAmount = game.smallBlind || 1;
-  const bbAmount = game.bigBlind || 2;
-  const sbPlayer = players[smallBlindIdx];
-  const bbPlayer = players[bigBlindIdx];
-  const sbPay = Math.min(sbAmount, sbPlayer.chips);
-  sbPlayer.chips -= sbPay;
-  sbPlayer.bet = sbPay;
-  pot += sbPay;
-  const bbPay = Math.min(bbAmount, bbPlayer.chips);
-  bbPlayer.chips -= bbPay;
-  bbPlayer.bet = bbPay;
-  pot += bbPay;
-  currentBet = Math.max(sbPay, bbPay);
-  // Each blind acts implicitly
-  players.forEach(p => p.hasActed = false);
-  sbPlayer.hasActed = false; // they still need to respond if raise
-  bbPlayer.hasActed = false;
-  // Set last aggressive to big blind
-  let lastAggressivePlayerIndex = bigBlindIdx;
-  // Current player is player after big blind
-  let currentPlayerIndex = nextActiveIndex(players, bigBlindIdx);
-  // Reset other fields
-  const update = {
-    players,
-    dealerIndex,
-    deck,
-    communityCards: [],
-    pot,
-    currentBet,
-    currentPlayerIndex,
-    lastAggressivePlayerIndex,
-    bettingRound: 0,
-    phase: 'preflop',
-    snipes: [],
-    snipingIndex: 0,
-    snipingStartIndex: 0,
-    started: true,
-    handNumber: (game.handNumber || 0) + 1,
-    outcomeMessage: '',
-  };
-  await updateDoc(docRef, update);
-}
-
-// Perform a call action
-async function callAction() {
-  const docRef = doc(db, 'games', currentGameId);
-  const snap = await getDoc(docRef);
-  const game = snap.data();
-  const idx = game.currentPlayerIndex;
-  const player = game.players[idx];
-  if (player.id !== myPlayerId) return;
-  if (player.folded) return;
-  // Determine the amount needed to call. If diff is zero, this is effectively a check.
-  const diff = game.currentBet - player.bet;
-  const pay = Math.min(diff, player.chips);
-  player.chips -= pay;
-  player.bet += pay;
-  game.pot += pay;
-  // Mark that the player has acted in this betting round. This flag is used to
-  // determine whether the round should end. If a raise occurs the flags are
-  // reset for all players except the raiser.
-  player.hasActed = true;
-  // Write the updated player back into the array before any further logic
-  game.players[idx] = player;
-  // Determine the next active player
-  const nextIdx = nextActiveIndex(game.players, idx);
-  // Determine if the betting round should end. A round ends when every active
-  // (non‑folded and non‑eliminated) player has taken an action in response to
-  // the latest bet. This avoids a situation where players get a second
-  // opportunity to act when no raise has occurred. We also rely on foldAction
-  // to detect the case where only one player remains.
-  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
-  const allActed = activePlayers.every(p => p.hasActed);
-  if (allActed) {
-    // Reset hasActed flags will be handled in advanceRound
-    await advanceRound(game);
-  } else {
-    await updateDoc(docRef, {
-      players: game.players,
-      pot: game.pot,
-      currentPlayerIndex: nextIdx,
-    });
-  }
-}
-
-// Perform a raise action
-async function raiseAction(amount) {
-  const raiseAmount = parseInt(amount);
-  if (isNaN(raiseAmount) || raiseAmount <= 0) {
-    messageArea.textContent = 'Invalid raise amount.';
-    return;
-  }
-  // Determine the maximum raise allowed based on the smallest stack among active players.
-  {
-    // Retrieve the current game state to compute the minimum chips.
-    const gameSnap = await getDoc(doc(db, 'games', currentGameId));
-    const currentGame = gameSnap.data();
-    const activePlayers = currentGame.players.filter(p => !p.folded && !p.eliminated);
-    if (activePlayers.length > 0) {
-      const minChips = Math.min(...activePlayers.map(p => p.chips));
-      if (raiseAmount > minChips) {
-        messageArea.textContent = `Raise amount exceeds the maximum allowed (${minChips}).`;
-        return;
-      }
-    }
-  }
-  const docRef = doc(db, 'games', currentGameId);
-  const snap = await getDoc(docRef);
-  const game = snap.data();
-  const idx = game.currentPlayerIndex;
-  const player = game.players[idx];
-  if (player.id !== myPlayerId) return;
-  if (player.folded) return;
-  const newBet = game.currentBet + raiseAmount;
-  const diff = newBet - player.bet;
-  const pay = Math.min(diff, player.chips);
-  player.chips -= pay;
-  player.bet += pay;
-  game.pot += pay;
-  game.currentBet = player.bet;
-  game.lastAggressivePlayerIndex = idx;
-  // Reset hasActed flags for all players except raiser
-  game.players.forEach((p) => {
-    if (!p.folded && !p.eliminated) {
-      p.hasActed = (p.id === player.id);
-    }
-  });
-  // Update players array
-  game.players[idx] = player;
-  const nextIdx = nextActiveIndex(game.players, idx);
-  await updateDoc(docRef, {
-    players: game.players,
-    pot: game.pot,
-    currentBet: game.currentBet,
-    lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
-    currentPlayerIndex: nextIdx,
-  });
-}
-
-// Perform a fold action
-async function foldAction() {
-  const docRef = doc(db, 'games', currentGameId);
-  const snap = await getDoc(docRef);
-  const game = snap.data();
-  const idx = game.currentPlayerIndex;
-  const player = game.players[idx];
-  if (player.id !== myPlayerId) return;
-  player.folded = true;
-  player.hasActed = true;
-  // Check if only one active player remains
-  // Determine the indices of all active players (preserve original indices). Using Array.prototype.filter
-  // with a second argument for index will return the index relative to the filtered array, not the
-  // original. That caused a bug where the pot was always awarded to the first entry in the filtered
-  // list. To fix this, build the list of active indices manually based on the original array.
-  const activeIndices = [];
-  for (let i = 0; i < game.players.length; i++) {
-    const p = game.players[i];
-    if (!p.folded && !p.eliminated) {
-      activeIndices.push(i);
-    }
-  }
-  if (activeIndices.length === 1) {
-    // Award pot to that player
-    const winnerIdx = activeIndices[0];
-    game.players[winnerIdx].chips += game.pot;
-    const outcome = `${game.players[winnerIdx].name} wins ${game.pot} chips (all others folded)`;
-    // Reset pot and phase
-    game.pot = 0;
-    game.phase = 'finished';
-    game.outcomeMessage = outcome;
-    // Mark hand finished
-    await updateDoc(docRef, {
-      players: game.players,
-      pot: game.pot,
-      phase: game.phase,
-      outcomeMessage: game.outcomeMessage,
-    });
-    return;
-  }
-  // Determine next player and decide whether to end the round. A betting round
-  // should end when all active players (those who have not folded or been
-  // eliminated) have taken an action in response to the current bet. The
-  // hasActed flag on each player tracks whether they have acted this round.
-  const nextIdx = nextActiveIndex(game.players, idx);
-  // If the folding player was lastAggressive, move lastAggressive to the previous active player
-  if (idx === game.lastAggressivePlayerIndex) {
-    let prev = idx;
-    do {
-      prev = (prev - 1 + game.players.length) % game.players.length;
-      if (!game.players[prev].folded && !game.players[prev].eliminated) break;
-    } while (true);
-    game.lastAggressivePlayerIndex = prev;
-  }
-  // Write back the updated player state before checking round completion
-  game.players[idx] = player;
-  // Check if all active players have acted. If so, advance to the next round.
-  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
-  const allActed = activePlayers.every(p => p.hasActed);
-  if (allActed) {
-    await advanceRound(game);
-  } else {
-    await updateDoc(docRef, {
-      players: game.players,
-      currentPlayerIndex: nextIdx,
-      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
-    });
-  }
-}
-
-// Advance to next betting round, sniping or showdown as appropriate
-async function advanceRound(game) {
-  const docRef = doc(db, 'games', currentGameId);
-  // Reset players' bet and hasActed flags
-  game.players.forEach((p) => {
-    p.bet = 0;
-    p.hasActed = false;
-  });
-  if (game.bettingRound === 0) {
-    // Move to flop (deal two cards)
-    const deck = game.deck;
-    const card1 = deck.pop();
-    const card2 = deck.pop();
-    game.communityCards.push(card1, card2);
-    game.bettingRound = 1;
-    game.phase = 'flop';
-    game.currentBet = 0;
-    // first to act is player left of dealer
-    const firstToAct = nextActiveIndex(game.players, game.dealerIndex);
-    game.lastAggressivePlayerIndex = firstToAct;
-    game.currentPlayerIndex = firstToAct;
-    await updateDoc(docRef, {
-      players: game.players,
-      communityCards: game.communityCards,
-      deck: deck,
-      bettingRound: game.bettingRound,
-      phase: game.phase,
-      currentBet: game.currentBet,
-      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
-      currentPlayerIndex: game.currentPlayerIndex,
-    });
-  } else if (game.bettingRound === 1) {
-    // Move to turn (deal two more cards)
-    const deck = game.deck;
-    const card3 = deck.pop();
-    const card4 = deck.pop();
-    game.communityCards.push(card3, card4);
-    game.bettingRound = 2;
-    game.phase = 'turn';
-    game.currentBet = 0;
-    const firstToAct = nextActiveIndex(game.players, game.dealerIndex);
-    game.lastAggressivePlayerIndex = firstToAct;
-    game.currentPlayerIndex = firstToAct;
-    await updateDoc(docRef, {
-      players: game.players,
-      communityCards: game.communityCards,
-      deck: deck,
-      bettingRound: game.bettingRound,
-      phase: game.phase,
-      currentBet: game.currentBet,
-      lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
-      currentPlayerIndex: game.currentPlayerIndex,
-    });
-  } else if (game.bettingRound === 2) {
-    // End betting, go to sniping phase
-    game.phase = 'sniping';
-    // Set sniping start index to last aggressive player
-    game.snipingStartIndex = game.lastAggressivePlayerIndex;
-    game.snipingIndex = game.lastAggressivePlayerIndex;
-    await updateDoc(docRef, {
-      players: game.players,
-      phase: game.phase,
-      snipingIndex: game.snipingIndex,
-      snipingStartIndex: game.snipingStartIndex,
-    });
-  }
-}
-
-// Submit a snipe declaration (handStr can be empty to skip)
-async function submitSnipe(snipe) {
-  const docRef = doc(db, 'games', currentGameId);
-  const snap = await getDoc(docRef);
-  const game = snap.data();
-  if (game.phase !== 'sniping') return;
-  // Only act if it's our turn
-  if (game.players[game.snipingIndex].id !== myPlayerId) return;
-  // Add snipe if provided
-  const snipes = game.snipes || [];
-  if (snipe) {
-    // If a legacy string was passed (from older UI)
-    if (typeof snipe === 'string') {
-      const handStr = snipe;
-      const trimmed = handStr.replace(/\s+/g, '');
-      if (trimmed) {
-        const parts = trimmed.split('-');
-        const numbers = parts.map(x => parseInt(x));
-        if (numbers.length === 5 && numbers.every(n => !isNaN(n) && n >= 1 && n <= 10)) {
-          const sorted = numbers.slice().sort((a, b) => a - b);
-          snipes.push(sorted.join('-'));
-        }
-      }
-    } else if (typeof snipe === 'object') {
-      // Simplified snipe: expect category and value
-      const cat = snipe.category;
-      const val = snipe.value;
-      if (cat && val) {
-        snipes.push({
-          by: myPlayerId,
-          name: myName,
-          category: parseInt(cat),
-          value: parseInt(val),
-        });
-      }
-    }
-  }
-  // Determine next sniping index
-  let nextIdx = nextActiveIndex(game.players, game.snipingIndex);
-  // If we loop back to start, end sniping and go to showdown
-  if (nextIdx === game.snipingStartIndex) {
-    // Proceed to showdown
-    await resolveShowdown(game, snipes);
-  } else {
-    await updateDoc(docRef, {
-      snipes: snipes,
-      snipingIndex: nextIdx,
-    });
-  }
-}
-
-// Resolve showdown: determine winner(s) and distribute pot
-async function resolveShowdown(game, snipes) {
-  const docRef = doc(db, 'games', currentGameId);
-  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
-  const results = [];
-  for (const p of activePlayers) {
-    const { rank, comboStr } = bestHandForPlayer(p, game.communityCards, snipes);
-    results.push({ player: p, rank, comboStr });
-  }
-  // Determine highest rank
-  let bestRank = [0];
-  results.forEach(res => {
-    if (compareRanks(res.rank, bestRank) > 0) {
-      bestRank = res.rank;
-    }
-  });
-  // Determine winners (could be multiple)
-  const winners = results.filter(res => compareRanks(res.rank, bestRank) === 0);
-  // Distribute pot evenly among winners
-  const share = Math.floor(game.pot / winners.length);
-  let remainder = game.pot % winners.length;
-  winners.forEach(res => {
-    res.player.chips += share;
-    if (remainder > 0) {
-      res.player.chips += 1;
-      remainder--;
-    }
-  });
-  // Compose outcome message, including sniped combinations and winning hand description
-  let outcome;
-  // Format winner names and pot distribution
-  if (winners.length === 1) {
-    outcome = `${winners[0].player.name} wins ${game.pot} chips.`;
-  } else {
-    const names = winners.map(w => w.player.name).join(' and ');
-    outcome = `${names} split the pot of ${game.pot} chips.`;
-  }
-  // Build snipes summary
-  let snipeSummary = '';
-  if (snipes && snipes.length > 0) {
-    const descs = snipes.map(s => {
-      if (!s) return '';
-      if (typeof s === 'string') {
-        return `5-card hand ${s}`;
-      }
-      const cat = s.category;
-      const val = s.value;
-      let desc;
-      switch (cat) {
-        case 7:
-          desc = `Four of a Kind (${val})`;
-          break;
-        case 6:
-          desc = `Full House (trip ${val})`;
-          break;
-        case 5:
-          desc = `Straight to ${val}`;
-          break;
-        case 4:
-          desc = `Three of a Kind (${val})`;
-          break;
-        case 3:
-          desc = `Two Pair (highest ${val})`;
-          break;
-        case 2:
-          desc = `Pair of ${val}s`;
-          break;
-        default:
-          desc = `High Card ${val}`;
-          break;
-      }
-      return `${desc} by ${s.name}`;
-    }).filter(Boolean);
-    if (descs.length > 0) {
-      snipeSummary = ' Sniped: ' + descs.join(', ') + '.';
-    }
-  }
-  // Build winning combination description
-  let winningDesc = '';
-  if (bestRank && bestRank[0] > 0) {
-    const cat = bestRank[0];
-    const high = bestRank[1];
-    switch (cat) {
-      case 7:
-        winningDesc = `Four of a Kind (${high})`;
-        break;
-      case 6:
-        winningDesc = `Full House (trip ${high})`;
-        break;
-      case 5:
-        winningDesc = `Straight to ${high}`;
-        break;
-      case 4:
-        winningDesc = `Three of a Kind (${high})`;
-        break;
-      case 3:
-        winningDesc = `Two Pair (highest ${high})`;
-        break;
-      case 2:
-        winningDesc = `Pair of ${high}s`;
-        break;
-      default:
-        winningDesc = `High Card ${high}`;
-        break;
-    }
-    winningDesc = ' Winning combination: ' + winningDesc + '.';
-  }
-  // Append details to outcome message
-  outcome = outcome + snipeSummary + winningDesc;
-  // Reset pot
-  game.pot = 0;
-  // Update players array with new chip counts
-  const updatedPlayers = game.players.map(p => {
-    const res = winners.find(w => w.player.id === p.id);
-    if (res) {
-      return { ...res.player };
-    }
-    return { ...p };
-  });
-  // Check for eliminations
-  updatedPlayers.forEach(p => {
-    if (p.chips <= 0) {
-      p.eliminated = true;
-    }
-  });
-  // Check if someone reached the target (75 chips)
-  let gameOver = false;
-  let overallWinner = null;
-  updatedPlayers.forEach(p => {
-    if (p.chips >= 75) {
-      gameOver = true;
-      overallWinner = p;
-    }
-  });
-  await updateDoc(docRef, {
-    players: updatedPlayers,
-    pot: game.pot,
-    phase: 'finished',
-    outcomeMessage: outcome,
-    gameOver: gameOver,
-  });
-  if (gameOver && overallWinner) {
-    await updateDoc(docRef, {
-      outcomeMessage: `${overallWinner.name} has reached 75 chips and wins the game!`,
-    });
-  }
-}
-
-// Wire up UI buttons to actions
-callBtn.addEventListener('click', () => {
-  callAction();
-});
-
-raiseBtn.addEventListener('click', () => {
-  const amount = raiseAmountInput.value;
-  raiseAction(amount);
-});
-
-foldBtn.addEventListener('click', () => {
-  foldAction();
 });
