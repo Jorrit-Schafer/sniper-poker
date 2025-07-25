@@ -4,27 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sniper Hold'em</title>
+    <!-- Use the consolidated stylesheet -->
     <link rel="stylesheet" href="style.css">
-    <!--
-      This page implements the client‑side for a simple Sniper Hold'em game.
-      It uses Firebase's JavaScript SDK loaded from the public CDN. According to
-      Firebase's documentation, you can selectively import only the products
-      you need when working from a static site by using module scripts that
-      pull the SDKs from https://www.gstatic.com. For example, to import
-      Firebase core and Firestore you can write:
-
-        <script type="module">
-          import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
-          import { getFirestore } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
-          // ... your code here ...
-        </script>
-
-      The Firebase docs show that after including the SDK you must provide
-      your own configuration object and call initializeApp() to set up the
-      connection【926625994547711†L450-L491】. The remainder of the game logic is
-      contained in main.js, which also imports the required Firebase
-      functionality.
-    -->
 </head>
 <body>
     <div id="lobby" class="screen">
@@ -64,7 +45,6 @@
             <button id="foldBtn" disabled>Fold</button>
             <button id="snipeBtn" style="display:none;">Declare Snipe</button>
             <input type="text" id="snipeInput" placeholder="e.g. 6-7-8-9-10" style="display:none;">
-            <!-- New simplified snipe inputs: category and high card -->
             <select id="snipeComboSelect" style="display:none;">
                 <option value="">Choose combination</option>
                 <option value="7">Four of a Kind</option>
@@ -90,10 +70,10 @@
             </select>
             <button id="submitSnipeBtn" style="display:none;">Submit Snipe</button>
         </div>
-        <!-- Display declared snipes during the sniping phase -->
         <div id="snipesDisplay" class="snipes-display"></div>
         <div id="messageArea" class="message-area"></div>
     </div>
+    <!-- Load the consolidated game logic -->
     <script type="module" src="main.js"></script>
 </body>
 </html>
