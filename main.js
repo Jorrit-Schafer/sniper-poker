@@ -590,6 +590,11 @@ async function startHand(game) {
     started: true,
     handNumber: (game.handNumber || 0) + 1,
     outcomeMessage: '',
+    // Track the total chips plus pot at the start of the hand so that the
+    // pot can be recomputed from chip differences. After posting blinds,
+    // players.reduce(chips,0) + pot equals the total chips each player
+    // started the hand with (e.g. 60 * numPlayers).
+    handTotalChips: players.reduce((sum, p) => sum + p.chips, 0) + pot,
   };
   await updateDoc(docRef, update);
 }
@@ -604,17 +609,36 @@ async function callAction() {
   if (player.id !== myPlayerId || player.folded) return;
   const diff = game.currentBet - player.bet;
   const pay = Math.min(diff, player.chips);
+  // Deduct chips and update bet
   player.chips -= pay;
   player.bet += pay;
-  game.pot += pay;
-  player.hasActed = true;
+  // Replace the player object in the array before computing pot
   game.players[idx] = player;
+  // Recompute the pot based on the difference between the starting total
+  // chips and the current sum of chips. This ensures the pot reflects all
+  // contributions from blinds, calls and raises.
+  if (game.handTotalChips) {
+    const chipsSum = game.players.reduce((sum, p) => sum + p.chips, 0);
+    game.pot = game.handTotalChips - chipsSum;
+  } else {
+    // Fallback: add the pay difference (legacy behavior)
+    game.pot += pay;
+  }
+  player.hasActed = true;
   const nextIdx = nextActiveIndex(game.players, idx);
   const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
   const allActed = activePlayers.every(p => p.hasActed);
   if (allActed) {
+    // Persist the updated players and pot before advancing. Without this,
+    // the recomputed pot could be lost when advanceRound() writes only
+    // selected fields back to Firestore.
+    await updateDoc(docRef, {
+      players: game.players,
+      pot: game.pot,
+    });
     await advanceRound(game);
   } else {
+    // Persist players, pot and next player index for the ongoing betting round.
     await updateDoc(docRef, {
       players: game.players,
       pot: game.pot,
@@ -647,17 +671,23 @@ async function raiseAction(amount) {
   const player = game.players[idx];
   if (player.id !== myPlayerId || player.folded) return;
   const newBet = game.currentBet + raiseAmount;
-  // The difference between the new bet level and the player's current bet.
   const diff = newBet - player.bet;
   const pay = Math.min(diff, player.chips);
-  // Deduct chips and update the player's total bet. Only the amount actually
-  // committed is added to the pot now; other players will contribute their
-  // differences on their calls.
+  // Deduct chips and update the player's bet
   player.chips -= pay;
   player.bet += pay;
-  game.pot += pay;
-  // The current bet level should reflect the intended new bet, not the
-  // raiser's individual bet (they might be all in and not fully cover it).
+  // Replace the raiser in the array before recomputing the pot
+  game.players[idx] = player;
+  // Recompute the pot based on the difference between the starting total chips
+  // for the hand and the current sum of chips. This ensures the pot always
+  // reflects all contributions. Fallback to adding pay if the property is missing.
+  if (game.handTotalChips) {
+    const chipsSum = game.players.reduce((sum, p) => sum + p.chips, 0);
+    game.pot = game.handTotalChips - chipsSum;
+  } else {
+    game.pot += pay;
+  }
+  // Set currentBet to the intended new bet level (not the raiser's individual bet)
   game.currentBet = newBet;
   game.lastAggressivePlayerIndex = idx;
   game.players.forEach((p) => {
@@ -760,6 +790,10 @@ async function advanceRound(game) {
       currentBet: game.currentBet,
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
       currentPlayerIndex: game.currentPlayerIndex,
+      // Carry forward the current pot to the next round.  Without
+      // specifying this, the pot persists implicitly, but including it
+      // ensures clarity and consistency across updates.
+      pot: game.pot,
     });
   } else if (game.bettingRound === 1) {
     const deck = game.deck;
@@ -781,6 +815,7 @@ async function advanceRound(game) {
       currentBet: game.currentBet,
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
       currentPlayerIndex: game.currentPlayerIndex,
+      pot: game.pot,
     });
   } else if (game.bettingRound === 2) {
     game.phase = 'sniping';
@@ -1082,6 +1117,9 @@ joinGameBtn.addEventListener('click', async () => {
     bet: 0,
     folded: false,
     eliminated: false,
+    // Initialise hasActed so that newly joined players participate correctly
+    // when the first hand starts.
+    hasActed: false,
   }];
   await updateDoc(docRef, { players: updatedPlayers });
   lobbyStatus.textContent = `Joined game ${gameId}.`;
