@@ -69,6 +69,10 @@ const snipeComboSelect = document.getElementById('snipeComboSelect');
 const snipeHighSelect = document.getElementById('snipeHighSelect');
 const snipesDisplay = document.getElementById('snipesDisplay');
 
+// New controls for confirming or cancelling a raise
+const confirmRaiseBtn = document.getElementById('confirmRaiseBtn');
+const cancelRaiseBtn = document.getElementById('cancelRaiseBtn');
+
 // Current user and game identifiers
 let myPlayerId = null;
 let myName = null;
@@ -322,7 +326,13 @@ function renderGame(game) {
   if (snipesDisplay) snipesDisplay.textContent = '';
   callBtn.disabled = true;
   raiseBtn.disabled = true;
+  // Hide and disable the raise controls by default. These will be
+  // re-enabled and displayed when it is the player's turn and they click Raise.
   raiseAmountInput.disabled = true;
+  raiseAmountInput.style.display = 'none';
+  if (confirmRaiseBtn) confirmRaiseBtn.style.display = 'none';
+  if (cancelRaiseBtn) cancelRaiseBtn.style.display = 'none';
+  raiseBtn.style.display = '';
   foldBtn.disabled = true;
   snipeBtn.style.display = 'none';
   snipeInput.style.display = 'none';
@@ -341,16 +351,52 @@ function renderGame(game) {
             callBtn.textContent = 'Call';
           }
         }
+        // Enable raise button and fold button on your turn. The raise amount
+        // input remains hidden until Raise is clicked.
         raiseBtn.disabled = false;
-        raiseAmountInput.disabled = false;
         foldBtn.disabled = false;
-        const active = game.players.filter(p => !p.folded && !p.eliminated);
-        if (active.length > 0) {
-          const minChips = Math.min(...active.map(p => p.chips));
-          raiseAmountInput.max = minChips;
-          if (parseInt(raiseAmountInput.value) > minChips) {
-            raiseAmountInput.value = minChips;
+        // Attach click handlers to manage the raise sequence. These
+        // handlers are recreated on each render to ensure fresh closures.
+        raiseBtn.onclick = () => {
+          if (raiseBtn.disabled) return;
+          // Hide the raise button and show the input and confirm/cancel buttons
+          raiseBtn.style.display = 'none';
+          raiseAmountInput.style.display = '';
+          raiseAmountInput.disabled = false;
+          if (confirmRaiseBtn) confirmRaiseBtn.style.display = '';
+          if (cancelRaiseBtn) cancelRaiseBtn.style.display = '';
+          // Update the maximum raise based on remaining chips
+          const active = game.players.filter(p => !p.folded && !p.eliminated);
+          if (active.length > 0) {
+            const minChips = Math.min(...active.map(p => p.chips));
+            raiseAmountInput.max = minChips;
+            if (parseInt(raiseAmountInput.value) > minChips) {
+              raiseAmountInput.value = minChips;
+            }
           }
+        };
+        if (confirmRaiseBtn) {
+          confirmRaiseBtn.onclick = async () => {
+            // Perform the raise with the entered amount
+            const amt = raiseAmountInput.value;
+            // Hide controls immediately to prevent multiple submissions
+            raiseAmountInput.style.display = 'none';
+            raiseAmountInput.disabled = true;
+            confirmRaiseBtn.style.display = 'none';
+            cancelRaiseBtn.style.display = 'none';
+            raiseBtn.style.display = '';
+            await raiseAction(amt);
+          };
+        }
+        if (cancelRaiseBtn) {
+          cancelRaiseBtn.onclick = () => {
+            // Reset and hide raise input without taking any action
+            raiseAmountInput.style.display = 'none';
+            raiseAmountInput.disabled = true;
+            if (confirmRaiseBtn) confirmRaiseBtn.style.display = 'none';
+            if (cancelRaiseBtn) cancelRaiseBtn.style.display = 'none';
+            raiseBtn.style.display = '';
+          };
         }
       }
     }
@@ -642,11 +688,14 @@ async function foldAction() {
     }
   }
   if (activeIndices.length === 1) {
+    // When only one player remains, award the entire pot to that player.
     const winnerIdx = activeIndices[0];
-    game.players[winnerIdx].chips += game.pot;
+    const potAmount = game.pot;
+    game.players[winnerIdx].chips += potAmount;
     game.pot = 0;
     game.phase = 'finished';
-    game.outcomeMessage = `${game.players[winnerIdx].name} wins ${game.pot} chips (all others folded)`;
+    // Report the amount actually won (before resetting pot)
+    game.outcomeMessage = `${game.players[winnerIdx].name} wins ${potAmount} chips (all others folded)`;
     await updateDoc(docRef, {
       players: game.players,
       pot: game.pot,
@@ -924,9 +973,11 @@ async function resolveShowdown(game, snipes) {
 callBtn.addEventListener('click', () => {
   callAction();
 });
+// The raise button functionality is handled dynamically in renderGame().
+// A click on raise will reveal the raise amount field along with confirm and
+// cancel buttons; see renderGame() for details.
 raiseBtn.addEventListener('click', () => {
-  const amount = raiseAmountInput.value;
-  raiseAction(amount);
+  // Intentionally left blank. Logic defined in renderGame().
 });
 foldBtn.addEventListener('click', () => {
   foldAction();
@@ -1013,8 +1064,8 @@ joinGameBtn.addEventListener('click', async () => {
     lobbyStatus.textContent = 'Game has already started.';
     return;
   }
-  if (game.players.length >= 6) {
-    lobbyStatus.textContent = 'Game is full (max 6 players).';
+  if (game.players.length >= 10) {
+    lobbyStatus.textContent = 'Game is full (max 10 players).';
     return;
   }
   const updatedPlayers = [...game.players, {
