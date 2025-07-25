@@ -454,6 +454,12 @@ async function subscribeToGame(gameId) {
       messageArea.textContent = 'Game no longer exists.';
       return;
     }
+    // Ensure currentGameId is set from the snapshot ID so that the lobby can
+    // always display the correct game code. This handles cases where the
+    // global variable wasn’t set before subscribing.
+    if (!currentGameId) {
+      currentGameId = snapshot.id;
+    }
     if (!game.started) {
       renderLobby(game);
     } else {
