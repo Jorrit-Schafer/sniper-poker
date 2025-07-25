@@ -1101,27 +1101,39 @@ joinGameBtn.addEventListener('click', async () => {
     return;
   }
   const game = snap.data();
-  if (game.started) {
-    lobbyStatus.textContent = 'Game has already started.';
-    return;
-  }
   if (game.players.length >= 10) {
     lobbyStatus.textContent = 'Game is full (max 10 players).';
     return;
   }
-  const updatedPlayers = [...game.players, {
+  // Allow players to join even after the game has started.  If the game is
+  // already in progress, the joining player will be marked as folded and
+  // considered to have acted for the current hand so they sit out until the
+  // next hand begins.  Otherwise they join as an active participant.
+  const isGameStarted = !!game.started;
+  const newPlayer = {
     id: myPlayerId,
     name: myName,
     chips: 60,
     hole: [],
     bet: 0,
-    folded: false,
+    folded: isGameStarted,
     eliminated: false,
-    // Initialise hasActed so that newly joined players participate correctly
-    // when the first hand starts.
-    hasActed: false,
-  }];
-  await updateDoc(docRef, { players: updatedPlayers });
-  lobbyStatus.textContent = `Joined game ${gameId}.`;
+    hasActed: isGameStarted,
+  };
+  const updatedPlayers = [...game.players, newPlayer];
+  const updateObj = { players: updatedPlayers };
+  // If a player joins during an ongoing hand, adjust handTotalChips to
+  // include their chips so that the pot computation stays consistent.  This
+  // prevents the pot from going negative when computing handTotalChips -
+  // current chips after a mid-hand join.
+  if (isGameStarted && game.handTotalChips !== undefined) {
+    updateObj.handTotalChips = game.handTotalChips + newPlayer.chips;
+  }
+  await updateDoc(docRef, updateObj);
+  if (isGameStarted) {
+    lobbyStatus.textContent = `Joined game ${gameId}. Wait for the next hand.`;
+  } else {
+    lobbyStatus.textContent = `Joined game ${gameId}.`;
+  }
   subscribeToGame(gameId);
 });
