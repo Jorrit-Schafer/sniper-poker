@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sniper Hold'em</title>
+    <link rel="stylesheet" href="style.css">
+    <!--
+      This page implements the client‑side for a simple Sniper Hold'em game.
+      It uses Firebase's JavaScript SDK loaded from the public CDN. According to
+      Firebase's documentation, you can selectively import only the products
+      you need when working from a static site by using module scripts that
+      pull the SDKs from https://www.gstatic.com. For example, to import
+      Firebase core and Firestore you can write:
+
+        <script type="module">
+          import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
+          import { getFirestore } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+          // ... your code here ...
+        </script>
+
+      The Firebase docs show that after including the SDK you must provide
+      your own configuration object and call initializeApp() to set up the
+      connection【926625994547711†L450-L491】. The remainder of the game logic is
+      contained in main.js, which also imports the required Firebase
+      functionality.
+    -->
+</head>
+<body>
+    <div id="lobby" class="screen">
+        <h1>Sniper Hold'em</h1>
+        <p class="description">This lightweight site lets up to six friends play a custom variant of Texas Hold'em using a 40‑card deck. Create a game or join an existing one by its ID. You will need to supply your own Firebase configuration when deploying to your account.</p>
+        <input type="text" id="nameInput" placeholder="Enter your name" autofocus>
+        <div class="lobby-actions">
+            <button id="createGameBtn">Create Game</button>
+            <div class="join-area">
+                <input type="text" id="gameIdInput" placeholder="Game ID">
+                <button id="joinGameBtn">Join Game</button>
+            </div>
+        </div>
+        <div id="lobbyStatus" class="status"></div>
+    </div>
+
+    <div id="game" class="screen" style="display:none;">
+        <div id="statusBar">
+            <span><strong>You:</strong> <span id="playerName"></span></span>
+            <span>| Chips: <span id="playerChips"></span></span>
+            <span>| Pot: <span id="pot"></span></span>
+            <span>| Phase: <span id="phase"></span></span>
+        </div>
+        <div id="playersArea" class="players-area"></div>
+        <div id="communityArea">
+            <h3>Community Cards</h3>
+            <div id="communityCards" class="card-container"></div>
+        </div>
+        <div id="holeArea">
+            <h3>Your Cards</h3>
+            <div id="holeCards" class="card-container"></div>
+        </div>
+        <div id="actionArea" class="action-area">
+            <button id="callBtn" disabled>Call</button>
+            <button id="raiseBtn" disabled>Raise</button>
+            <input type="number" id="raiseAmount" placeholder="Amount" min="1" value="1" disabled>
+            <button id="foldBtn" disabled>Fold</button>
+            <button id="snipeBtn" style="display:none;">Declare Snipe</button>
+            <input type="text" id="snipeInput" placeholder="e.g. 6-7-8-9-10" style="display:none;">
+            <button id="submitSnipeBtn" style="display:none;">Submit Snipe</button>
+        </div>
+        <div id="messageArea" class="message-area"></div>
+    </div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
