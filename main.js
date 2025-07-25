@@ -302,6 +302,22 @@ function renderGame(game) {
   if (myPlayer) {
     playerChipsSpan.textContent = myPlayer.chips;
   }
+
+  // Always update the call/check button text based on whether the current player
+  // has already matched the current bet. If the player’s bet is equal to or
+  // exceeds the currentBet, calling is actually checking. Otherwise, the
+  // difference must be paid and the button should read "Call". If it is not
+  // your turn, the text will still reflect the upcoming action.
+  if (myPlayer) {
+    const diffVal = game.currentBet - (myPlayer.bet || 0);
+    if (diffVal <= 0) {
+      callBtn.textContent = 'Check';
+    } else {
+      callBtn.textContent = 'Call';
+    }
+  } else {
+    callBtn.textContent = 'Call';
+  }
   // Render community cards
   communityCardsDiv.innerHTML = '';
   for (let i = 0; i < game.communityCards.length; i++) {
@@ -332,7 +348,14 @@ function renderGame(game) {
     if (p.folded) {
       div.classList.add('folded');
     }
-    div.innerHTML = `<strong>${p.name}</strong><br>Chips: ${p.chips}<br>Bet: ${p.bet}`;
+    // Build the player info string. During showdown or after a hand has finished,
+    // reveal each player's hole cards to everyone. Otherwise only show chips and bet.
+    let infoHtml = `<strong>${p.name}</strong><br>Chips: ${p.chips}<br>Bet: ${p.bet}`;
+    if ((game.phase === 'showdown' || game.phase === 'finished') && p.hole && p.hole.length === 2) {
+      const holeStr = p.hole.join(' ');
+      infoHtml += `<br>Cards: ${holeStr}`;
+    }
+    div.innerHTML = infoHtml;
     playersArea.appendChild(div);
   });
   // Clear message area
@@ -356,7 +379,20 @@ function renderGame(game) {
     // It's my turn if I'm the current player and I'm not folded
     if (game.players[game.currentPlayerIndex] && game.players[game.currentPlayerIndex].id === myPlayerId) {
       if (!myPlayer.folded) {
+        // Determine whether the action is a call or a check. If the player has already
+        // matched the current bet (diff <= 0), this should be labelled as a "Check".
+        // Otherwise, it is a "Call" for the remaining difference.
         callBtn.disabled = false;
+        if (myPlayer) {
+          const diff = game.currentBet - (myPlayer.bet || 0);
+          if (diff <= 0) {
+            callBtn.textContent = 'Check';
+          } else {
+            callBtn.textContent = 'Call';
+          }
+        } else {
+          callBtn.textContent = 'Call';
+        }
         raiseBtn.disabled = false;
         raiseAmountInput.disabled = false;
         foldBtn.disabled = false;
@@ -699,23 +735,29 @@ async function callAction() {
   const player = game.players[idx];
   if (player.id !== myPlayerId) return;
   if (player.folded) return;
+  // Determine the amount needed to call. If diff is zero, this is effectively a check.
   const diff = game.currentBet - player.bet;
   const pay = Math.min(diff, player.chips);
   player.chips -= pay;
   player.bet += pay;
   game.pot += pay;
+  // Mark that the player has acted in this betting round. This flag is used to
+  // determine whether the round should end. If a raise occurs the flags are
+  // reset for all players except the raiser.
   player.hasActed = true;
-  // Check if this ends the round
-  let nextIdx = nextActiveIndex(game.players, idx);
-  let endRound = false;
-  // Determine if all active players have matched currentBet or are folded
-  const allMatched = game.players.every((p) => p.folded || p.eliminated || p.bet === game.currentBet);
-  if (idx === game.lastAggressivePlayerIndex && allMatched) {
-    endRound = true;
-  }
-  // Update players array in game
+  // Write the updated player back into the array before any further logic
   game.players[idx] = player;
-  if (endRound) {
+  // Determine the next active player
+  const nextIdx = nextActiveIndex(game.players, idx);
+  // Determine if the betting round should end. A round ends when every active
+  // (non‑folded and non‑eliminated) player has taken an action in response to
+  // the latest bet. This avoids a situation where players get a second
+  // opportunity to act when no raise has occurred. We also rely on foldAction
+  // to detect the case where only one player remains.
+  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+  const allActed = activePlayers.every(p => p.hasActed);
+  if (allActed) {
+    // Reset hasActed flags will be handled in advanceRound
     await advanceRound(game);
   } else {
     await updateDoc(docRef, {
@@ -791,7 +833,17 @@ async function foldAction() {
   player.folded = true;
   player.hasActed = true;
   // Check if only one active player remains
-  const activeIndices = game.players.filter(p => !p.folded && !p.eliminated).map((p, index) => index);
+  // Determine the indices of all active players (preserve original indices). Using Array.prototype.filter
+  // with a second argument for index will return the index relative to the filtered array, not the
+  // original. That caused a bug where the pot was always awarded to the first entry in the filtered
+  // list. To fix this, build the list of active indices manually based on the original array.
+  const activeIndices = [];
+  for (let i = 0; i < game.players.length; i++) {
+    const p = game.players[i];
+    if (!p.folded && !p.eliminated) {
+      activeIndices.push(i);
+    }
+  }
   if (activeIndices.length === 1) {
     // Award pot to that player
     const winnerIdx = activeIndices[0];
@@ -810,13 +862,13 @@ async function foldAction() {
     });
     return;
   }
-  // Determine next player and check end of round
+  // Determine next player and decide whether to end the round. A betting round
+  // should end when all active players (those who have not folded or been
+  // eliminated) have taken an action in response to the current bet. The
+  // hasActed flag on each player tracks whether they have acted this round.
   const nextIdx = nextActiveIndex(game.players, idx);
-  let endRound = false;
-  const allMatched = game.players.every((p) => p.folded || p.eliminated || p.bet === game.currentBet);
-  // If the folding player was lastAggressive, move lastAggressive to previous active
+  // If the folding player was lastAggressive, move lastAggressive to the previous active player
   if (idx === game.lastAggressivePlayerIndex) {
-    // set lastAggressive to previous active player
     let prev = idx;
     do {
       prev = (prev - 1 + game.players.length) % game.players.length;
@@ -824,12 +876,12 @@ async function foldAction() {
     } while (true);
     game.lastAggressivePlayerIndex = prev;
   }
-  if (idx === game.lastAggressivePlayerIndex && allMatched) {
-    endRound = true;
-  }
-  // Update players array
+  // Write back the updated player state before checking round completion
   game.players[idx] = player;
-  if (endRound) {
+  // Check if all active players have acted. If so, advance to the next round.
+  const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+  const allActed = activePlayers.every(p => p.hasActed);
+  if (allActed) {
     await advanceRound(game);
   } else {
     await updateDoc(docRef, {
