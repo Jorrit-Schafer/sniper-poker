@@ -647,12 +647,18 @@ async function raiseAction(amount) {
   const player = game.players[idx];
   if (player.id !== myPlayerId || player.folded) return;
   const newBet = game.currentBet + raiseAmount;
+  // The difference between the new bet level and the player's current bet.
   const diff = newBet - player.bet;
   const pay = Math.min(diff, player.chips);
+  // Deduct chips and update the player's total bet. Only the amount actually
+  // committed is added to the pot now; other players will contribute their
+  // differences on their calls.
   player.chips -= pay;
   player.bet += pay;
   game.pot += pay;
-  game.currentBet = player.bet;
+  // The current bet level should reflect the intended new bet, not the
+  // raiser's individual bet (they might be all in and not fully cover it).
+  game.currentBet = newBet;
   game.lastAggressivePlayerIndex = idx;
   game.players.forEach((p) => {
     if (!p.folded && !p.eliminated) {
