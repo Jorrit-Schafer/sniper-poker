@@ -71,10 +71,17 @@ const snipeInput = document.getElementById('snipeInput');
 const submitSnipeBtn = document.getElementById('submitSnipeBtn');
 const messageArea = document.getElementById('messageArea');
 
-// Current user and game identifiers.  We attempt to restore these from
-// localStorage so that a page reload does not change the host's ID and
-// prevent them from starting a game.  If the storage is unavailable or
-// the values are not present we fall back to null.
+// New elements for simplified sniping.  These dropdowns let players select
+// a hand category and a highest card instead of entering the full five
+// card combination.  They are added in index.html and remain hidden
+// except during the sniping phase.
+const snipeComboSelect = document.getElementById('snipeCombo');
+const snipeHighSelect = document.getElementById('snipeHigh');
+
+// Current user and game identifiers.  We attempt to restore values from
+// localStorage so that a host who refreshes the page can still start
+// the game.  If storage is unavailable or the keys are not present
+// these will remain null until a game is created or joined.
 let myPlayerId = null;
 let myName = null;
 let currentGameId = null;
@@ -86,8 +93,7 @@ try {
   if (storedName) myName = storedName;
   if (storedGame) currentGameId = storedGame;
 } catch (err) {
-  // localStorage may be unavailable in some contexts (e.g. private
-  // browsing) so ignore any errors here.
+  // ignore storage errors
 }
 let unsubscribe = null;
 
@@ -224,9 +230,8 @@ function compareRanks(a, b) {
 // Determine the best non‑sniped 5‑card hand for a player given community cards and snipes.
 function bestHandForPlayer(player, communityCards, snipes) {
   const cards = [...player.hole, ...communityCards];
-  // All combinations of 5 cards from 6 cards (index combinations of 6 choose 5). There are 6 combinations.
+  // Generate all 5-card combinations by skipping each of the 6 cards once.
   const combinations = [];
-  // For 6 cards [0,1,2,3,4,5], 6 choose 5 => exclude each index once
   for (let skip = 0; skip < cards.length; skip++) {
     const combo = [];
     for (let i = 0; i < cards.length; i++) {
@@ -237,36 +242,42 @@ function bestHandForPlayer(player, communityCards, snipes) {
   let bestRank = [0];
   let bestComboStr = null;
   for (const combo of combinations) {
-    const sortedStr = combo.slice().sort((a, b) => a - b).join('-');
-    if (snipes && snipes.includes(sortedStr)) {
-      // this combo is sniped, skip
-      continue;
+    // Determine if this combo has been sniped.  Two types of snipes are
+    // supported: legacy 5-card declarations (sorted string of numbers)
+    // and simplified category-mainValue declarations.
+    let isSniped = false;
+    if (snipes && snipes.length > 0) {
+      const sortedStr = combo.slice().sort((a, b) => a - b).join('-');
+      if (snipes.includes(sortedStr)) {
+        isSniped = true;
+      } else {
+        const rank = evaluateHand(combo);
+        const category = rank[0];
+        const mainVal = rank[1];
+        const key = `${category}-${mainVal}`;
+        if (snipes.includes(key)) {
+          isSniped = true;
+        }
+      }
     }
+    if (isSniped) continue;
     const rank = evaluateHand(combo);
     if (compareRanks(rank, bestRank) > 0) {
       bestRank = rank;
-      bestComboStr = sortedStr;
+      bestComboStr = combo.slice().sort((a, b) => a - b).join('-');
     }
   }
-  // If all combos sniped, bestRank remains [0] indicating invalid hand
   return { rank: bestRank, comboStr: bestComboStr };
 }
 
-// Render lobby UI with list of players and game ID if available
+// Render lobby UI with list of players if available
 function renderLobby(game) {
   if (!game) return;
   if (!game.players) return;
-  /*
-   * Show both the current game ID and the list of players.  When a host
-   * creates a game the status message showing the game code is
-   * immediately overwritten on the next Firestore snapshot by the
-   * original implementation.  Many users thought no game code was
-   * generated because the message disappeared so quickly.  To address
-   * this the lobby now always displays the current game ID alongside
-   * the list of players.  The global variable `currentGameId` is set
-   * whenever a game is created or joined so we can reuse it here.
-   */
   const names = game.players.map(p => p.name).join(', ');
+  // Always show the game ID alongside the list of players.  Without this
+  // the message about the newly created game ID would be overwritten by
+  // the players list on the next snapshot.
   if (currentGameId) {
     lobbyStatus.textContent = `Game ID: ${currentGameId} — Players: ${names}`;
   } else {
@@ -343,9 +354,12 @@ function renderGame(game) {
   raiseBtn.disabled = true;
   raiseAmountInput.disabled = true;
   foldBtn.disabled = true;
+  // Hide sniping controls by default
   snipeBtn.style.display = 'none';
   snipeInput.style.display = 'none';
   submitSnipeBtn.style.display = 'none';
+  if (snipeComboSelect) snipeComboSelect.style.display = 'none';
+  if (snipeHighSelect) snipeHighSelect.style.display = 'none';
   // Only if game has started and not finished
   if (game.phase === 'preflop' || game.phase === 'flop' || game.phase === 'turn') {
     // It's my turn if I'm the current player and I'm not folded
@@ -360,20 +374,93 @@ function renderGame(game) {
   } else if (game.phase === 'sniping') {
     // Sniping phase
     if (game.snipes === undefined) game.snipes = [];
-    if (game.snipingIndex !== undefined && game.players[game.snipingIndex] && game.players[game.snipingIndex].id === myPlayerId) {
-      // show snipe controls
+    // Show a summary of declared snipes to all players.  Convert each snipe
+    // into a human‑readable description.  For the simplified format
+    // category-mainCard we use category names; for legacy 5‑card snipes we
+    // display the sequence as entered.
+    if (game.snipes.length > 0) {
+      const descs = [];
+      game.snipes.forEach((s) => {
+        const parts = s.split('-');
+        if (parts.length === 2) {
+          const cat = parseInt(parts[0], 10);
+          const val = parseInt(parts[1], 10);
+          let name;
+          switch (cat) {
+            case 7:
+              name = `Four of a Kind (quad ${val})`;
+              break;
+            case 6:
+              name = `Full House (trip ${val})`;
+              break;
+            case 5:
+              name = `Straight to ${val}`;
+              break;
+            case 4:
+              name = `Three of a Kind (trip ${val})`;
+              break;
+            case 3:
+              name = `Two Pair (high pair ${val})`;
+              break;
+            case 2:
+              name = `Pair of ${val}`;
+              break;
+            case 1:
+              name = `High Card ${val}`;
+              break;
+            default:
+              name = s;
+          }
+          descs.push(name);
+        } else {
+          // legacy five-card declaration
+          descs.push(s);
+        }
+      });
+      messageArea.textContent = `Declared snipes: ${descs.join(', ')}`;
+    } else {
+      messageArea.textContent = 'No snipes declared yet.';
+    }
+    // If it's our turn to declare a snipe, show the declare button and
+    // handle revealing the dropdowns and submitting a snipe.
+    if (
+      game.snipingIndex !== undefined &&
+      game.players[game.snipingIndex] &&
+      game.players[game.snipingIndex].id === myPlayerId
+    ) {
       snipeBtn.style.display = '';
+      // Ensure other controls hidden until the user clicks the declare button
       snipeInput.style.display = 'none';
+      if (snipeComboSelect) snipeComboSelect.style.display = 'none';
+      if (snipeHighSelect) snipeHighSelect.style.display = 'none';
       submitSnipeBtn.style.display = 'none';
       snipeBtn.onclick = () => {
         snipeBtn.style.display = 'none';
-        snipeInput.style.display = '';
+        // hide unused text input
+        snipeInput.style.display = 'none';
+        // show dropdowns and submit button
+        if (snipeComboSelect) snipeComboSelect.style.display = '';
+        if (snipeHighSelect) snipeHighSelect.style.display = '';
         submitSnipeBtn.style.display = '';
       };
       submitSnipeBtn.onclick = async () => {
-        const handStr = snipeInput.value.trim();
-        snipeInput.value = '';
-        await submitSnipe(handStr);
+        let cat = null;
+        let val = null;
+        if (snipeComboSelect) cat = parseInt(snipeComboSelect.value, 10);
+        if (snipeHighSelect) val = parseInt(snipeHighSelect.value, 10);
+        const snipeStr = cat && val ? `${cat}-${val}` : '';
+        // Reset dropdowns for next time
+        if (snipeComboSelect) {
+          snipeComboSelect.selectedIndex = 0;
+          snipeComboSelect.style.display = 'none';
+        }
+        if (snipeHighSelect) {
+          snipeHighSelect.selectedIndex = 0;
+          snipeHighSelect.style.display = 'none';
+        }
+        submitSnipeBtn.style.display = 'none';
+        snipeBtn.style.display = '';
+        await submitSnipe(snipeStr);
       };
     }
   } else if (game.phase === 'showdown' || game.phase === 'finished') {
@@ -432,9 +519,9 @@ createGameBtn.addEventListener('click', async () => {
   }
   myName = name;
   // Create a unique identifier for this player. crypto.randomUUID() is available in
-  // modern browsers; fall back to a random string if unavailable.  Persist
-  // this ID and name in localStorage so that reloading the page does not
-  // create a new ID (which would cause the host to lose control of the game).
+  // modern browsers; fall back to a random string if unavailable.  Persist the
+  // identifier, name and game ID to localStorage so the host remains
+  // recognised after a page refresh.
   myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : generateGameCode() + Date.now();
@@ -837,22 +924,33 @@ async function advanceRound(game) {
   }
 }
 
-// Submit a snipe declaration (handStr can be empty to skip)
+// Submit a snipe declaration.  The argument can be either a string like
+// "5-8" (category-highestCard) for the simplified mechanic or a
+// legacy 5-card declaration like "6-7-8-9-10".  An empty string
+// indicates the player passes.
 async function submitSnipe(handStr) {
   const docRef = doc(db, 'games', currentGameId);
   const snap = await getDoc(docRef);
   const game = snap.data();
-  if (game.phase !== 'sniping') return;
+  if (!game || game.phase !== 'sniping') return;
   // Only act if it's our turn
   if (game.players[game.snipingIndex].id !== myPlayerId) return;
-  // Add snipe if provided
-  const snipes = game.snipes || [];
-  const trimmed = handStr.replace(/\s+/g, '');
+  // Prepare snipes array
+  const snipes = Array.isArray(game.snipes) ? [...game.snipes] : [];
+  const trimmed = (handStr || '').replace(/\s+/g, '');
   if (trimmed) {
-    // Validate the format: e.g. "6-7-8-9-10"
     const parts = trimmed.split('-');
-    const numbers = parts.map(x => parseInt(x));
-    if (numbers.length === 5 && numbers.every(n => !isNaN(n) && n >= 1 && n <= 10)) {
+    const numbers = parts.map(x => parseInt(x, 10));
+    // Simplified format: [category, highestCard]
+    if (parts.length === 2 && numbers.every(n => !isNaN(n))) {
+      const category = numbers[0];
+      const value = numbers[1];
+      if (category >= 1 && category <= 7 && value >= 1 && value <= 10) {
+        const key = `${category}-${value}`;
+        snipes.push(key);
+      }
+    } else if (parts.length === 5 && numbers.every(n => !isNaN(n) && n >= 1 && n <= 10)) {
+      // Legacy format: 5 card numbers; sort and join
       const sorted = numbers.slice().sort((a, b) => a - b);
       snipes.push(sorted.join('-'));
     }
@@ -861,7 +959,6 @@ async function submitSnipe(handStr) {
   let nextIdx = nextActiveIndex(game.players, game.snipingIndex);
   // If we loop back to start, end sniping and go to showdown
   if (nextIdx === game.snipingStartIndex) {
-    // Proceed to showdown
     await resolveShowdown(game, snipes);
   } else {
     await updateDoc(docRef, {
@@ -899,7 +996,7 @@ async function resolveShowdown(game, snipes) {
       remainder--;
     }
   });
-  // Compose outcome message
+  // Compose outcome message including sniped combinations and the winning hand.
   let outcome;
   if (winners.length === 1) {
     outcome = `${winners[0].player.name} wins ${game.pot} chips.`;
@@ -907,6 +1004,79 @@ async function resolveShowdown(game, snipes) {
     const names = winners.map(w => w.player.name).join(' and ');
     outcome = `${names} split the pot of ${game.pot} chips.`;
   }
+  // Describe snipes for the final message
+  let snipesDesc = 'None';
+  if (snipes && snipes.length > 0) {
+    const descs = [];
+    snipes.forEach((s) => {
+      const parts = s.split('-');
+      if (parts.length === 2) {
+        const cat = parseInt(parts[0], 10);
+        const val = parseInt(parts[1], 10);
+        let name;
+        switch (cat) {
+          case 7:
+            name = `Four of a Kind (quad ${val})`;
+            break;
+          case 6:
+            name = `Full House (trip ${val})`;
+            break;
+          case 5:
+            name = `Straight to ${val}`;
+            break;
+          case 4:
+            name = `Three of a Kind (trip ${val})`;
+            break;
+          case 3:
+            name = `Two Pair (high pair ${val})`;
+            break;
+          case 2:
+            name = `Pair of ${val}`;
+            break;
+          case 1:
+            name = `High Card ${val}`;
+            break;
+          default:
+            name = s;
+        }
+        descs.push(name);
+      } else {
+        descs.push(s);
+      }
+    });
+    snipesDesc = descs.join(', ');
+  }
+  // Describe the winning hand category and main value.  We use the
+  // previously computed bestRank array for the winners.
+  const bestRankCategory = bestRank[0];
+  const bestRankValue = bestRank[1];
+  let winningDesc;
+  switch (bestRankCategory) {
+    case 7:
+      winningDesc = `Four of a Kind (quad ${bestRankValue})`;
+      break;
+    case 6:
+      winningDesc = `Full House (trip ${bestRankValue})`;
+      break;
+    case 5:
+      winningDesc = `Straight to ${bestRankValue}`;
+      break;
+    case 4:
+      winningDesc = `Three of a Kind (trip ${bestRankValue})`;
+      break;
+    case 3:
+      winningDesc = `Two Pair (high pair ${bestRankValue})`;
+      break;
+    case 2:
+      winningDesc = `Pair of ${bestRankValue}`;
+      break;
+    case 1:
+    default:
+      winningDesc = `High Card ${bestRankValue}`;
+      break;
+  }
+  outcome += `\nSniped combinations: ${snipesDesc}`;
+  outcome += `\nWinning combination: ${winningDesc}`;
   // Reset pot
   game.pot = 0;
   // Update players array with new chip counts
