@@ -9,17 +9,48 @@
 </head>
 <body>
     <div id="lobby" class="screen">
-        <h1>Sniper Hold'em</h1>
-        <p class="description">This lightweight site lets up to six friends play a custom variant of Texas Hold'em using a 40‑card deck. Create a game or join an existing one by its ID. You will need to supply your own Firebase configuration when deploying to your account.</p>
-        <input type="text" id="nameInput" placeholder="Enter your name" autofocus>
-        <div class="lobby-actions">
-            <button id="createGameBtn">Create Game</button>
-            <div class="join-area">
-                <input type="text" id="gameIdInput" placeholder="Game ID">
-                <button id="joinGameBtn">Join Game</button>
+        <!-- Wrap the lobby controls in an overlay to improve readability on the poker themed background -->
+        <div class="lobby-overlay">
+            <h1>Sniper Hold'em</h1>
+            <p class="description">This lightweight site lets up to six friends play a custom variant of Texas Hold'em using a 40‑card deck. Create a game or join an existing one by its ID. You will need to supply your own Firebase configuration when deploying to your account.</p>
+            <input type="text" id="nameInput" placeholder="Enter your name" autofocus>
+            <div class="lobby-actions">
+                <button id="createGameBtn">Create Game</button>
+                <div class="join-area">
+                    <input type="text" id="gameIdInput" placeholder="Game ID">
+                    <button id="joinGameBtn">Join Game</button>
+                </div>
+            </div>
+            <div id="lobbyStatus" class="status"></div>
+            <!-- Instructions for Sniper Hold'em -->
+            <div class="instructions">
+                <h3>Setup</h3>
+                <ul>
+                    <li><strong>Starting Stack:</strong> Each player begins with 60 chips.</li>
+                    <li><strong>The Deck:</strong> A 40‑card deck with four copies of each number from 1 to 10. There are no suits.</li>
+                </ul>
+                <h3>Hand Rankings</h3>
+                <p>Since there are no suits in Sniper Hold'em, flushes and straight flushes are impossible. Hands rank as follows (highest to lowest):</p>
+                <ul>
+                    <li><strong>Four of a Kind</strong></li>
+                    <li><strong>Full House</strong></li>
+                    <li><strong>Straight</strong></li>
+                    <li><strong>Three of a Kind</strong></li>
+                    <li><strong>Two Pair</strong></li>
+                    <li><strong>One Pair</strong></li>
+                    <li><strong>High Card</strong></li>
+                </ul>
+                <h3>New Gameplay: A Round of Sniper Hold'em</h3>
+                <p>A hand of Sniper Hold'em unfolds over two betting rounds before the critical sniping phase:</p>
+                <ul>
+                    <li><strong>1. The Pre‑Flop:</strong> Players post the small and big blinds, receive two private hole cards and enter a round of betting.</li>
+                    <li><strong>2. The Flop (2 Cards):</strong> Two community cards are dealt face up followed by a second betting round starting with the first active player to the left of the dealer.</li>
+                    <li><strong>3. The Turn (2 Cards):</strong> Two more community cards are dealt face up. This is the last set of community cards; there is no river. A final betting round occurs.</li>
+                    <li><strong>4. The Sniping Phase:</strong> After the final betting round, starting with the last player who bet or raised, each player can declare a specific five‑card hand to <em>snipe</em> (for example, “I snipe a straight with 10 as the highest card”). If an opponent reveals exactly that hand during the showdown, it is disqualified and cannot win the pot.</li>
+                    <li><strong>5. The Showdown:</strong> Players reveal their hole cards and form their best five‑card hand using any combination of their two hole cards and the four community cards. The highest ranking non‑sniped hand wins the pot.</li>
+                </ul>
             </div>
         </div>
-        <div id="lobbyStatus" class="status"></div>
     </div>
 
     <div id="game" class="screen" style="display:none;">
