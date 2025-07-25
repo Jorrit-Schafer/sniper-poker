@@ -2,10 +2,16 @@
    "style (1).css" but uses a conventional filename. */
 
 body {
+    /* A poker-themed background image for the lobby.  The image
+       poker_bg.png is included in the repository and provides a
+       green felt table with chips.  Use a fixed background so it
+       fills the viewport on all screen sizes. */
     margin: 0;
     font-family: Arial, Helvetica, sans-serif;
-    background: #f5f5f5;
-    color: #333;
+    background: #0a561d url('poker_bg.png') no-repeat center center fixed;
+    background-size: cover;
+    color: #fff;
+    min-height: 100vh;
 }
 
 .screen {
@@ -23,7 +29,8 @@ h1 {
 .description {
     margin-bottom: 20px;
     font-size: 0.9rem;
-    color: #555;
+    /* Lighten the description text for better contrast on dark backgrounds */
+    color: #ddd;
 }
 
 .lobby-actions {
@@ -44,6 +51,9 @@ input[type="text"], input[type="number"] {
     font-size: 1rem;
     border: 1px solid #ccc;
     border-radius: 4px;
+    /* Make inputs stand out on the dark lobby overlay */
+    background: rgba(255, 255, 255, 0.9);
+    color: #333;
 }
 
 button {
@@ -66,9 +76,53 @@ button:not(:disabled):hover {
     background: #0056b3;
 }
 
+/* When the actual game area is visible, revert text to dark for
+   better contrast on the default white card backgrounds. */
+#game {
+    color: #333;
+}
+
 .status {
     margin-top: 15px;
-    color: #c00;
+    /* Use a warmer red for the status message against the green felt */
+    color: #ff6347;
+}
+
+/* Lobby overlay container to improve readability against the busy poker
+   table background.  It wraps the lobby controls and instructions. */
+.lobby-overlay {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    max-width: 800px;
+    margin: 40px auto;
+}
+
+/* Instructions section styling */
+.instructions {
+    text-align: left;
+    margin-top: 20px;
+    color: #eee;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.instructions h3 {
+    margin-top: 15px;
+    margin-bottom: 8px;
+    color: #fff;
+    font-size: 1.1rem;
+}
+
+.instructions ul {
+    margin-left: 20px;
+    margin-bottom: 10px;
+    padding-left: 20px;
+}
+
+.instructions li {
+    margin-bottom: 5px;
 }
 
 #statusBar {
