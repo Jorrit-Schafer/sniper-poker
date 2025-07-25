@@ -71,10 +71,24 @@ const snipeInput = document.getElementById('snipeInput');
 const submitSnipeBtn = document.getElementById('submitSnipeBtn');
 const messageArea = document.getElementById('messageArea');
 
-// Current user and game identifiers
+// Current user and game identifiers.  We attempt to restore these from
+// localStorage so that a page reload does not change the host's ID and
+// prevent them from starting a game.  If the storage is unavailable or
+// the values are not present we fall back to null.
 let myPlayerId = null;
 let myName = null;
 let currentGameId = null;
+try {
+  const storedId = localStorage.getItem('sniper_myPlayerId');
+  const storedName = localStorage.getItem('sniper_myName');
+  const storedGame = localStorage.getItem('sniper_currentGameId');
+  if (storedId) myPlayerId = storedId;
+  if (storedName) myName = storedName;
+  if (storedGame) currentGameId = storedGame;
+} catch (err) {
+  // localStorage may be unavailable in some contexts (e.g. private
+  // browsing) so ignore any errors here.
+}
 let unsubscribe = null;
 
 // Utility: generate a random 4‑letter/number game code
@@ -238,12 +252,26 @@ function bestHandForPlayer(player, communityCards, snipes) {
   return { rank: bestRank, comboStr: bestComboStr };
 }
 
-// Render lobby UI with list of players if available
+// Render lobby UI with list of players and game ID if available
 function renderLobby(game) {
   if (!game) return;
   if (!game.players) return;
+  /*
+   * Show both the current game ID and the list of players.  When a host
+   * creates a game the status message showing the game code is
+   * immediately overwritten on the next Firestore snapshot by the
+   * original implementation.  Many users thought no game code was
+   * generated because the message disappeared so quickly.  To address
+   * this the lobby now always displays the current game ID alongside
+   * the list of players.  The global variable `currentGameId` is set
+   * whenever a game is created or joined so we can reuse it here.
+   */
   const names = game.players.map(p => p.name).join(', ');
-  lobbyStatus.textContent = `Players: ${names}`;
+  if (currentGameId) {
+    lobbyStatus.textContent = `Game ID: ${currentGameId} — Players: ${names}`;
+  } else {
+    lobbyStatus.textContent = `Players: ${names}`;
+  }
   // Show start button if current user is host and there are at least 2 players
   const isHost = (game.creatorId === myPlayerId);
   let startBtn = document.getElementById('startGameBtn');
@@ -404,10 +432,21 @@ createGameBtn.addEventListener('click', async () => {
   }
   myName = name;
   // Create a unique identifier for this player. crypto.randomUUID() is available in
-  // modern browsers; fall back to a random string if unavailable.
-  myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : generateGameCode() + Date.now();
+  // modern browsers; fall back to a random string if unavailable.  Persist
+  // this ID and name in localStorage so that reloading the page does not
+  // create a new ID (which would cause the host to lose control of the game).
+  myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : generateGameCode() + Date.now();
   const gameId = generateGameCode();
   currentGameId = gameId;
+  try {
+    localStorage.setItem('sniper_myPlayerId', myPlayerId);
+    localStorage.setItem('sniper_myName', myName);
+    localStorage.setItem('sniper_currentGameId', currentGameId);
+  } catch (_) {
+    // ignore storage errors
+  }
   // Create game document with initial fields
   const gameData = {
     creatorId: myPlayerId,
@@ -462,8 +501,17 @@ joinGameBtn.addEventListener('click', async () => {
     return;
   }
   myName = name;
-  myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : generateGameCode() + Date.now();
+  myPlayerId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : generateGameCode() + Date.now();
   currentGameId = gameId;
+  try {
+    localStorage.setItem('sniper_myPlayerId', myPlayerId);
+    localStorage.setItem('sniper_myName', myName);
+    localStorage.setItem('sniper_currentGameId', currentGameId);
+  } catch (_) {
+    // ignore storage errors
+  }
   const docRef = doc(db, 'games', gameId);
   const snap = await getDoc(docRef);
   if (!snap.exists()) {
