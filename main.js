@@ -28,12 +28,12 @@ import {
 // You can find these values in your Firebase console under your app settings.
 // See https://firebase.google.com/docs/web/setup for details.
 const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME"
+  apiKey: "AIzaSyA7sQscjjawGtWwTLO8S7OMPjWywVRaYfs",
+  authDomain: "sniper-hold-em.firebaseapp.com",
+  projectId: "sniper-hold-em",
+  storageBucket: "sniper-hold-em.firebasestorage.app",
+  messagingSenderId: "467999048041",
+  appId: "1:467999048041:web:197d1877c0037536cd3df8"
 };
 
 // Only initialise Firebase if a configuration has been provided.
