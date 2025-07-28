@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sniper Hold'em</title>
+    <title>Sniper Poker</title>
     <!-- Use the consolidated stylesheet -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -11,8 +11,9 @@
     <div id="lobby" class="screen">
         <!-- Wrap the lobby controls in an overlay to improve readability on the poker themed background -->
         <div class="lobby-overlay">
-            <h1>Sniper Hold'em</h1>
-            <p class="description">This lightweight site lets up to ten friends play a custom variant of Texas Hold'em using a 40‑card deck. Create a game or join an existing one by its ID. You will need to supply your own Firebase configuration when deploying to your account.</p>
+            <h1>Sniper Poker</h1>
+            <p class="description">This site lets play a custom "sniper" variant of poker with up to ten players. 
+Create a game or join an existing one by its ID.</p>
             <input type="text" id="nameInput" placeholder="Enter your name" autofocus>
             <div class="lobby-actions">
                 <button id="createGameBtn">Create Game</button>
@@ -22,7 +23,7 @@
                 </div>
             </div>
             <div id="lobbyStatus" class="status"></div>
-            <!-- Instructions for Sniper Hold'em -->
+            <!-- Instructions for Sniper Poker -->
             <div class="instructions">
                 <h3>Setup</h3>
                 <ul>
@@ -30,7 +31,7 @@
                     <li><strong>The Deck:</strong> A 40‑card deck with four copies of each number from 1 to 10. There are no suits.</li>
                 </ul>
                 <h3>Hand Rankings</h3>
-                <p>Since there are no suits in Sniper Hold'em, flushes and straight flushes are impossible. Hands rank as follows (highest to lowest):</p>
+                <p>Since there are no suits in Sniper Poker, flushes and straight flushes are impossible. Hands rank as follows (highest to lowest):</p>
                 <ul>
                     <li><strong>Four of a Kind</strong></li>
                     <li><strong>Full House</strong></li>
@@ -40,13 +41,13 @@
                     <li><strong>One Pair</strong></li>
                     <li><strong>High Card</strong></li>
                 </ul>
-                <h3>New Gameplay: A Round of Sniper Hold'em</h3>
-                <p>A hand of Sniper Hold'em unfolds over <strong>three</strong> betting rounds before the critical sniping phase:</p>
+                <h3>New Gameplay: A Round of Sniper Poker</h3>
+                <p>A hand of Sniper Poker unfolds over <strong>three</strong> betting rounds before the critical sniping phase:</p>
                 <ul>
                     <li><strong>1. The Pre‑Flop:</strong> Players post the small and big blinds, receive two private hole cards and enter a round of betting.</li>
                     <li><strong>2. The Flop (2 Cards):</strong> Two community cards are dealt face up. This triggers the <em>second</em> betting round, starting with the first active player to the left of the dealer.</li>
                     <li><strong>3. The Turn (2 Cards):</strong> Two more community cards are dealt face up, bringing the total community cards to four (there is no river). This triggers the <em>third and final</em> betting round.</li>
-                    <li><strong>4. The Sniping Phase:</strong> After the final betting round, starting with the last player who bet or raised, each player can declare a specific five‑card hand to <em>snipe</em> (for example, “I snipe a straight with 10 as the highest card”). If an opponent reveals exactly that hand during the showdown, it is disqualified and cannot win the pot.</li>
+                    <li><strong>4. The Sniping Phase:</strong> After the final betting round, starting with the last player who bet or raised, each player can declare a combination (along with the highest ranking card in the combination) to <em>snipe</em> (for example, “I snipe a straight with 10 as the highest card”). Anyone with that combination during the showdown, cannot use it to win win the pot.</li>
                     <li><strong>5. The Showdown:</strong> Players reveal their hole cards and form their best five‑card hand using any combination of their two hole cards and the four community cards. The highest ranking non‑sniped hand wins the pot.</li>
                 </ul>
             </div>
