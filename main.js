@@ -524,9 +524,18 @@ async function startHand(game) {
   if (game.handNumber > 0) {
     dealerIndex = nextActiveIndex(game.players, dealerIndex);
   }
-  const activePlayers = game.players.filter(p => !p.eliminated && p.chips > 0);
-  if (activePlayers.length < 2) {
-    await updateDoc(docRef, { gameOver: true, outcomeMessage: `${activePlayers[0].name} wins the game!` });
+  // Determine which players are eligible to participate in the new hand.
+  // A player is eligible if they still have chips and have not been eliminated.
+  // Note that a player's `folded` state from the previous hand should not
+  // prevent them from being considered here – everyone with chips gets a chance
+  // to play the next hand.
+  const eligiblePlayers = game.players.filter(p => !p.eliminated && p.chips > 0);
+  if (eligiblePlayers.length < 2) {
+    // If fewer than two players remain with chips, the game is over.  Award
+    // the victory to the remaining player (or anyone not eliminated if no
+    // one has chips) and halt further hand starts.
+    const winner = eligiblePlayers.length === 1 ? eligiblePlayers[0] : game.players.find(p => !p.eliminated);
+    await updateDoc(docRef, { gameOver: true, outcomeMessage: `${winner.name} wins the game!` });
     return;
   }
   const deck = [];
@@ -536,18 +545,29 @@ async function startHand(game) {
     }
   }
   shuffle(deck);
+  // Reset all players for the new hand.  Players who still have chips receive
+  // fresh hole cards and have their folded status cleared.  Eliminated
+  // players remain folded with no cards.  Every player's hasActed flag is
+  // cleared so the betting round proceeds correctly.
   const players = game.players.map((p) => {
     const newP = { ...p };
     if (newP.eliminated || newP.chips <= 0) {
+      // Eliminated players do not participate in the hand.  They keep
+      // their eliminated status, are marked as folded and receive no cards.
       newP.eliminated = true;
       newP.hole = [];
       newP.bet = 0;
       newP.folded = true;
     } else {
+      // Active players receive fresh cards and are reset to un‑folded.
       newP.hole = [deck.pop(), deck.pop()];
       newP.bet = 0;
       newP.folded = false;
     }
+    // In either case, reset the hasActed flag so the betting round starts
+    // cleanly.  This is important so that players who were marked as
+    // having acted in a previous hand (for example, those who joined
+    // mid‑hand) will be able to act in this hand.
     newP.hasActed = false;
     return newP;
   });
@@ -1105,33 +1125,36 @@ joinGameBtn.addEventListener('click', async () => {
     lobbyStatus.textContent = 'Game is full (max 10 players).';
     return;
   }
-  // Allow players to join even after the game has started.  If the game is
-  // already in progress, the joining player will be marked as folded and
-  // considered to have acted for the current hand so they sit out until the
-  // next hand begins.  Otherwise they join as an active participant.
-  const isGameStarted = !!game.started;
+  // When joining, always add the new player as an active participant.  Even
+  // if the game has already started, the joining player should not be
+  // flagged as folded or as having already acted.  This allows the game
+  // state to cleanly reset them at the start of the next hand.  They will
+  // still sit out the remainder of the current hand because their entry
+  // occurs after the current betting sequence has begun.
   const newPlayer = {
     id: myPlayerId,
     name: myName,
     chips: 60,
     hole: [],
     bet: 0,
-    folded: isGameStarted,
+    folded: false,
     eliminated: false,
-    hasActed: isGameStarted,
+    hasActed: false,
   };
   const updatedPlayers = [...game.players, newPlayer];
   const updateObj = { players: updatedPlayers };
-  // If a player joins during an ongoing hand, adjust handTotalChips to
-  // include their chips so that the pot computation stays consistent.  This
-  // prevents the pot from going negative when computing handTotalChips -
-  // current chips after a mid-hand join.
-  if (isGameStarted && game.handTotalChips !== undefined) {
+  // If a player joins during an ongoing hand and we are tracking
+  // handTotalChips, include the new player's chips so the pot can be
+  // recomputed correctly.  Without this adjustment, the recomputed pot
+  // could become negative when players join mid-hand.
+  if (game.started && game.handTotalChips !== undefined) {
     updateObj.handTotalChips = game.handTotalChips + newPlayer.chips;
   }
   await updateDoc(docRef, updateObj);
-  if (isGameStarted) {
-    lobbyStatus.textContent = `Joined game ${gameId}. Wait for the next hand.`;
+  if (game.started) {
+    // Inform the player that they will be seated for the next hand.  The
+    // current betting round will proceed without them.
+    lobbyStatus.textContent = `Joined game ${gameId}. You'll participate starting next hand.`;
   } else {
     lobbyStatus.textContent = `Joined game ${gameId}.`;
   }
