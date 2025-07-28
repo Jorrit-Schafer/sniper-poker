@@ -257,9 +257,28 @@ function renderLobby(game) {
       startBtn.id = 'startGameBtn';
       startBtn.textContent = 'Start Game';
       startBtn.onclick = async () => {
-        // Always start the hand with the latest game state.  Passing no argument
-        // ensures startHand() will fetch a fresh snapshot from Firestore.
-        await startHand();
+        // Before starting the hand, fetch the latest game data from
+        // Firestore to avoid using a stale snapshot.  Only proceed if we
+        // have a valid game ID; otherwise there's no document to fetch.
+        if (!currentGameId) {
+          console.warn('No currentGameId set when starting the game.');
+          return;
+        }
+        try {
+          const ref = doc(db, 'games', currentGameId);
+          const snap = await getDoc(ref);
+          if (snap.exists()) {
+            await startHand(snap.data());
+          } else {
+            // Fallback: if the document does not exist, call startHand() with
+            // no argument so it can decide how to proceed.
+            await startHand();
+          }
+        } catch (err) {
+          console.error('Error fetching game before start:', err);
+          // Attempt to start with whatever context startHand can obtain.
+          await startHand();
+        }
       };
       lobbyDiv.appendChild(startBtn);
     }
@@ -483,9 +502,25 @@ function renderGame(game) {
         nextBtn.id = 'nextHandBtn';
         nextBtn.textContent = 'Next Hand';
         nextBtn.onclick = async () => {
-          // Fetch the latest game state when starting the next hand.  This
-          // prevents stale snapshots from omitting recently joined players.
-          await startHand();
+          // Before starting the next hand, fetch the latest game state.  As
+          // with the lobby start button, ensure the currentGameId is set
+          // and handle errors gracefully.
+          if (!currentGameId) {
+            console.warn('No currentGameId set when starting the next hand.');
+            return;
+          }
+          try {
+            const ref = doc(db, 'games', currentGameId);
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+              await startHand(snap.data());
+            } else {
+              await startHand();
+            }
+          } catch (err) {
+            console.error('Error fetching game before next hand:', err);
+            await startHand();
+          }
           nextBtn.remove();
         };
         messageArea.appendChild(nextBtn);
@@ -523,20 +558,28 @@ async function subscribeToGame(gameId) {
 // Host: start a new hand
 async function startHand(game) {
   if (!db) return;
-  // Always fetch the latest game state from Firestore to avoid using a stale
-  // snapshot.  If a game object was provided and we successfully fetch the
-  // latest data, the fetched data will overwrite the passed-in object.
-  const docRef = doc(db, 'games', currentGameId);
-  try {
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      game = snap.data();
+  // Use the provided game object as a fallback.  We'll attempt to fetch
+  // a fresh copy from Firestore if a currentGameId is available.  If the
+  // fetch succeeds, it replaces the local copy; otherwise we continue
+  // with the passed-in data.
+  let localGame = game;
+  if (currentGameId) {
+    try {
+      const ref = doc(db, 'games', currentGameId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        localGame = snap.data();
+      }
+    } catch (err) {
+      console.error('Error fetching game for startHand:', err);
     }
-  } catch (err) {
-    console.error('Error fetching game for startHand:', err);
   }
-  // If after fetching there is no valid game or the game is over, exit.
-  if (!game || game.gameOver) return;
+  // If we still don't have a game or it's already over, abort the hand start.
+  if (!localGame || localGame.gameOver) return;
+  // From here on, operate on the up‑to‑date game data.  Assign back to the
+  // function parameter so that the remainder of this function can refer to
+  // `game` transparently.
+  game = localGame;
   let dealerIndex = game.dealerIndex || 0;
   if (game.handNumber > 0) {
     dealerIndex = nextActiveIndex(game.players, dealerIndex);
