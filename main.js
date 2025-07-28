@@ -257,7 +257,9 @@ function renderLobby(game) {
       startBtn.id = 'startGameBtn';
       startBtn.textContent = 'Start Game';
       startBtn.onclick = async () => {
-        await startHand(game);
+        // Always start the hand with the latest game state.  Passing no argument
+        // ensures startHand() will fetch a fresh snapshot from Firestore.
+        await startHand();
       };
       lobbyDiv.appendChild(startBtn);
     }
@@ -481,7 +483,9 @@ function renderGame(game) {
         nextBtn.id = 'nextHandBtn';
         nextBtn.textContent = 'Next Hand';
         nextBtn.onclick = async () => {
-          await startHand(game);
+          // Fetch the latest game state when starting the next hand.  This
+          // prevents stale snapshots from omitting recently joined players.
+          await startHand();
           nextBtn.remove();
         };
         messageArea.appendChild(nextBtn);
