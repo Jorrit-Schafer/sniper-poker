@@ -522,8 +522,21 @@ async function subscribeToGame(gameId) {
 
 // Host: start a new hand
 async function startHand(game) {
-  if (!db || !game || game.gameOver) return;
+  if (!db) return;
+  // Always fetch the latest game state from Firestore to avoid using a stale
+  // snapshot.  If a game object was provided and we successfully fetch the
+  // latest data, the fetched data will overwrite the passed-in object.
   const docRef = doc(db, 'games', currentGameId);
+  try {
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      game = snap.data();
+    }
+  } catch (err) {
+    console.error('Error fetching game for startHand:', err);
+  }
+  // If after fetching there is no valid game or the game is over, exit.
+  if (!game || game.gameOver) return;
   let dealerIndex = game.dealerIndex || 0;
   if (game.handNumber > 0) {
     dealerIndex = nextActiveIndex(game.players, dealerIndex);
