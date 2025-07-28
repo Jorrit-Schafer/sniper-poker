@@ -576,6 +576,8 @@ async function startHand(game) {
   }
   // If we still don't have a game or it's already over, abort the hand start.
   if (!localGame || localGame.gameOver) return;
+  const docRef = doc(db, 'games', currentGameId);
+
   // From here on, operate on the up‑to‑date game data.  Assign back to the
   // function parameter so that the remainder of this function can refer to
   // `game` transparently.
