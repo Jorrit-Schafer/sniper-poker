@@ -1,4 +1,4 @@
-# sniper-holdem
-Play Sniper Hold'Em from Devil's Plan
+# sniperpoker
+Play Sniper Poker
 
-https://jorrit-schafer.github.io/sniper-holdem/
+https://jorrit-schafer.github.io/sniper-poker/
