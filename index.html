@@ -22,10 +22,6 @@
                 </div>
             </div>
             <div id="lobbyStatus" class="status"></div>
-            <!-- Container for dynamically inserted start game button.  The script will
-                 insert the host's Start Game button here so that it appears
-                 above the rules/instructions. -->
-            <div id="startGameContainer"></div>
             <!-- Instructions for Sniper Poker -->
             <div class="instructions">
                 <h3>Setup</h3>
@@ -65,14 +61,12 @@
             <span>| Pot: <span id="pot"></span></span>
             <span>| Phase: <span id="phase"></span></span>
         </div>
-        <div id="playersArea" class="players-area"></div>
-        <div id="communityArea">
-            <h3>Community Cards</h3>
-            <div id="communityCards" class="card-container"></div>
-        </div>
-        <div id="holeArea">
-            <h3>Your Cards</h3>
-            <div id="holeCards" class="card-container"></div>
+        <!-- Poker table wrapper. Seats and community cards will be rendered dynamically inside this element -->
+        <div id="tableWrapper">
+            <div id="pokerTable">
+                <!-- Community cards will be inserted here dynamically -->
+                <div id="communityCards" class="community-cards"></div>
+            </div>
         </div>
         <div id="actionArea" class="action-area">
             <button id="callBtn" disabled>Call</button>
@@ -85,8 +79,7 @@
             <button id="snipeBtn" style="display:none;">Declare Snipe</button>
             <input type="text" id="snipeInput" placeholder="e.g. 6-7-8-9-10" style="display:none;">
             <select id="snipeComboSelect" style="display:none;">
-                <!-- The empty option indicates no combination was sniped -->
-                <option value="">No combination sniped</option>
+                <option value="">Choose combination</option>
                 <option value="7">Four of a Kind</option>
                 <option value="6">Full House</option>
                 <option value="5">Straight</option>
@@ -96,8 +89,7 @@
                 <option value="1">High Card</option>
             </select>
             <select id="snipeHighSelect" style="display:none;">
-                <!-- The empty option indicates no ranking card was sniped -->
-                <option value="">Noranking card sniped</option>
+                <option value="">Highest card</option>
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3</option>
@@ -110,8 +102,6 @@
                 <option value="10">10</option>
             </select>
             <button id="submitSnipeBtn" style="display:none;">Submit Snipe</button>
-            <!-- Button to call time on another player.  Visible when it's another player's turn. -->
-            <button id="callTimeBtn" style="display:none;">Call Time</button>
         </div>
         <div id="snipesDisplay" class="snipes-display"></div>
         <div id="messageArea" class="message-area"></div>
