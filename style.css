@@ -202,3 +202,157 @@ button:not(:disabled):hover {
     font-size: 0.95rem;
     color: #333;
 }
+
+/* ==========================================================
+   Poker Table Layout Enhancements
+
+   The following styles implement an oval poker table with
+   player seats positioned around it. Each seat displays the
+   player's name, chip count, bet and cards. The table and
+   seats adapt responsively for different screen sizes.
+   ========================================================== */
+
+/* Container for the table: centers the table and maintains
+   a responsive aspect ratio. */
+#tableWrapper {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    /* Allow the height to be determined by the table's padding */
+    height: auto;
+}
+
+/* Oval table styling: uses padding-top to maintain aspect ratio
+   and border-radius with different x/y radii to create an ellipse. */
+#pokerTable {
+    position: relative;
+    width: 100%;
+    height: 0;
+    padding-top: 60%; /* height is 60% of width */
+    border-radius: 50% / 35%;
+    background: #0b573a;
+    border: 10px solid #5b3f32;
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.6);
+    overflow: visible;
+}
+
+/* Container for community cards placed at the center of the table */
+.community-cards {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    gap: 6px;
+}
+
+/* Styling for each community card (either via .community-cards .card
+   or .community-card) */
+.community-cards .card,
+.community-card {
+    width: 48px;
+    height: 68px;
+    border: 1px solid #999;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #333;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Player seats positioned around the table */
+.player-seat {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 90px;
+    padding: 4px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 2px solid rgba(0, 0, 0, 0.2);
+    color: #333;
+    text-align: center;
+    font-size: 0.8rem;
+}
+
+@media (min-width: 700px) {
+    .player-seat {
+        width: 110px;
+        font-size: 0.85rem;
+    }
+}
+
+/* Highlight for the active player's seat */
+.player-seat.current-turn {
+    border-color: #007bff;
+    box-shadow: 0 0 6px rgba(0, 123, 255, 0.6);
+}
+
+/* Dim folded or eliminated players */
+.player-seat.folded {
+    opacity: 0.6;
+}
+.player-seat.eliminated {
+    opacity: 0.3;
+}
+
+/* Cards in a player's seat */
+.player-seat .cards {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    margin-bottom: 2px;
+}
+
+.player-seat .cards .card {
+    width: 26px;
+    height: 36px;
+    border: 1px solid #666;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: bold;
+    background: #fff;
+    color: #333;
+}
+
+/* Face-down card styling */
+.player-seat .cards .card.back {
+    background: #2b3e2c;
+    color: #2b3e2c;
+}
+
+/* Player info section (name and chip count) */
+.player-seat .player-info {
+    margin-bottom: 2px;
+}
+.player-seat .player-info .name {
+    font-weight: bold;
+}
+.player-seat .player-info .chips {
+    font-size: 0.75rem;
+}
+
+/* Bet display (chips in front of the seat) */
+.player-seat .bet {
+    margin-top: 2px;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: #b8860b;
+}
+
+/* Simple chip icon using gradients */
+.chip-icon {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #ffecb3, #b8860b);
+}
