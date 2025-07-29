@@ -22,6 +22,8 @@
                 </div>
             </div>
             <div id="lobbyStatus" class="status"></div>
+            <!-- Container to insert the start game button when the host is ready -->
+            <div id="startGameContainer"></div>
             <!-- Instructions for Sniper Poker -->
             <div class="instructions">
                 <h3>Setup</h3>
@@ -61,13 +63,14 @@
             <span>| Pot: <span id="pot"></span></span>
             <span>| Phase: <span id="phase"></span></span>
         </div>
-        <!-- Poker table wrapper. Seats and community cards will be rendered dynamically inside this element -->
+        <!-- New poker table wrapper for players and community cards -->
         <div id="tableWrapper">
             <div id="pokerTable">
-                <!-- Community cards will be inserted here dynamically -->
+                <!-- Community cards will be inserted here -->
                 <div id="communityCards" class="community-cards"></div>
             </div>
         </div>
+        <!-- Action buttons and controls -->
         <div id="actionArea" class="action-area">
             <button id="callBtn" disabled>Call</button>
             <button id="raiseBtn" disabled>Raise</button>
@@ -103,7 +106,9 @@
             </select>
             <button id="submitSnipeBtn" style="display:none;">Submit Snipe</button>
         </div>
+        <!-- Area to display declared snipes -->
         <div id="snipesDisplay" class="snipes-display"></div>
+        <!-- Area to show messages like outcome and timers -->
         <div id="messageArea" class="message-area"></div>
     </div>
     <!-- Load the consolidated game logic -->
