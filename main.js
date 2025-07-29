@@ -20,6 +20,8 @@ import {
   updateDoc,
   onSnapshot,
   serverTimestamp,
+  // We'll use deleteField if needed to remove fields (not used currently)
+  // deleteField,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 
 // Firebase configuration (replace with your project config)
@@ -68,6 +70,12 @@ const messageArea = document.getElementById('messageArea');
 const snipeComboSelect = document.getElementById('snipeComboSelect');
 const snipeHighSelect = document.getElementById('snipeHighSelect');
 const snipesDisplay = document.getElementById('snipesDisplay');
+
+// Button for calling time on another player. This allows any non-active player
+// to place a 30-second clock on the current player. When the timer
+// expires, the current player automatically checks or folds depending on
+// whether they owe chips to call.
+const callTimeBtn = document.getElementById('callTimeBtn');
 
 // New controls for confirming or cancelling a raise
 const confirmRaiseBtn = document.getElementById('confirmRaiseBtn');
@@ -280,7 +288,17 @@ function renderLobby(game) {
           await startHand();
         }
       };
-      lobbyDiv.appendChild(startBtn);
+      // Insert the start game button into the designated container so it appears
+      // above the rules and instructions.  If the container exists, append
+      // the button there; otherwise fall back to appending to the lobby div.
+      const container = document.getElementById('startGameContainer');
+      if (container) {
+        // Clear any existing content before inserting the new button
+        container.innerHTML = '';
+        container.appendChild(startBtn);
+      } else {
+        lobbyDiv.appendChild(startBtn);
+      }
     }
   } else {
     if (startBtn) startBtn.remove();
@@ -336,7 +354,8 @@ function renderGame(game) {
       div.classList.add('folded');
     }
     let infoHtml = `<strong>${p.name}</strong><br>Chips: ${p.chips}<br>Bet: ${p.bet}`;
-    if ((game.phase === 'showdown' || game.phase === 'finished') && p.hole && p.hole.length === 2) {
+    // Reveal hole cards only at showdown/finished for players who did not fold. Folded players keep their cards hidden.
+    if ((game.phase === 'showdown' || game.phase === 'finished') && !p.folded && p.hole && p.hole.length === 2) {
       const holeStr = p.hole.join(' ');
       infoHtml += `<br>Cards: ${holeStr}`;
     }
@@ -360,6 +379,11 @@ function renderGame(game) {
   if (snipeComboSelect) snipeComboSelect.style.display = 'none';
   if (snipeHighSelect) snipeHighSelect.style.display = 'none';
   submitSnipeBtn.style.display = 'none';
+  // Hide call time button by default; it will be displayed based on game state below.
+  if (callTimeBtn) {
+    callTimeBtn.style.display = 'none';
+    callTimeBtn.disabled = true;
+  }
   if (game.phase === 'preflop' || game.phase === 'flop' || game.phase === 'turn') {
     if (game.players[game.currentPlayerIndex] && game.players[game.currentPlayerIndex].id === myPlayerId) {
       if (!myPlayer.folded) {
@@ -421,6 +445,14 @@ function renderGame(game) {
         }
       }
     }
+    // Show call time button when it's another player's turn and no active time call exists.
+    if (callTimeBtn && game.players[game.currentPlayerIndex] && game.players[game.currentPlayerIndex].id !== myPlayerId) {
+      // Do not show during an ongoing time call or if the game has ended.
+      if (!game.timeCallStart && game.phase !== 'finished' && game.phase !== 'showdown') {
+        callTimeBtn.style.display = '';
+        callTimeBtn.disabled = false;
+      }
+    }
   } else if (game.phase === 'sniping') {
     if (game.snipes === undefined) game.snipes = [];
     if (snipesDisplay) {
@@ -429,6 +461,11 @@ function renderGame(game) {
         snipesDisplay.textContent = 'No snipes declared yet.';
       } else {
         const descriptions = snipesArr.map(s => {
+          if (!s) return '';
+          // Explicit no-snipe declarations
+          if (typeof s === 'object' && s.noSnipe) {
+            return `No snipe declared by ${s.name}`;
+          }
           if (typeof s === 'string') {
             return `5-card hand ${s}`;
           }
@@ -459,7 +496,7 @@ function renderGame(game) {
               break;
           }
           return `${desc} by ${s.name}`;
-        });
+        }).filter(Boolean);
         snipesDisplay.textContent = 'Declared snipes: ' + descriptions.join(', ');
       }
     }
@@ -527,6 +564,28 @@ function renderGame(game) {
       }
     }
   }
+  // If a time call is active, update message area and possibly show a countdown.
+  if (game.timeCallStart && typeof game.timeCallStart === 'object') {
+    // Determine remaining seconds
+    try {
+      const now = Date.now();
+      const startMs = game.timeCallStart.toMillis ? game.timeCallStart.toMillis() : game.timeCallStart;
+      const elapsed = now - startMs;
+      const remaining = Math.max(0, 30000 - elapsed);
+      const secs = Math.ceil(remaining / 1000);
+      const targetIdx = game.timedPlayerIndex;
+      if (game.players[targetIdx]) {
+        const targetName = game.players[targetIdx].name;
+        if (game.players[targetIdx].id === myPlayerId) {
+          messageArea.textContent = `Time has been called on you! You have ${secs} seconds to act.`;
+        } else {
+          messageArea.textContent = `Time called on ${targetName}. ${secs} seconds remaining.`;
+        }
+      }
+    } catch (e) {
+      // ignore errors in countdown calculations
+    }
+  }
 }
 
 // Listen to changes in the current game document
@@ -551,6 +610,9 @@ async function subscribeToGame(gameId) {
       lobbyDiv.style.display = 'none';
       gameDiv.style.display = '';
       renderGame(game);
+        // Check for an active time call expiration.  The host is responsible
+        // for enforcing timeouts on stalled players.
+        checkTimeCall(game);
     }
   });
 }
@@ -677,6 +739,10 @@ async function startHand(game) {
     // players.reduce(chips,0) + pot equals the total chips each player
     // started the hand with (e.g. 60 * numPlayers).
     handTotalChips: players.reduce((sum, p) => sum + p.chips, 0) + pot,
+    // Clear any residual timer data from the previous hand
+    timeCallStart: null,
+    timeCallBy: null,
+    timedPlayerIndex: null,
   };
   await updateDoc(docRef, update);
 }
@@ -717,6 +783,10 @@ async function callAction() {
     await updateDoc(docRef, {
       players: game.players,
       pot: game.pot,
+      // Clear any active time call once a player acts
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
     await advanceRound(game);
   } else {
@@ -725,6 +795,9 @@ async function callAction() {
       players: game.players,
       pot: game.pot,
       currentPlayerIndex: nextIdx,
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
   }
 }
@@ -785,6 +858,10 @@ async function raiseAction(amount) {
     currentBet: game.currentBet,
     lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
     currentPlayerIndex: nextIdx,
+    // Clear any active time call once a player raises
+    timeCallStart: null,
+    timeCallBy: null,
+    timedPlayerIndex: null,
   });
 }
 
@@ -819,6 +896,10 @@ async function foldAction() {
       pot: game.pot,
       phase: game.phase,
       outcomeMessage: game.outcomeMessage,
+      // Clear any active time call
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
     return;
   }
@@ -841,7 +922,185 @@ async function foldAction() {
       players: game.players,
       currentPlayerIndex: nextIdx,
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+      // Clear any active time call
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
+  }
+}
+
+// Place a 30-second clock on the current player.  Any player other than the
+// one whose turn it is may call time.  This function sets timestamp
+// metadata on the game document so that all clients can display the
+// countdown.  Once the timer expires, the host will automatically
+// enforce a check or fold via the autoHandleTimeout function.
+async function callTimeAction() {
+  if (!db) return;
+  if (!currentGameId) return;
+  const docRef = doc(db, 'games', currentGameId);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  if (!game) return;
+  // Only allow calling time during betting rounds (not during sniping or showdown)
+  if (game.phase !== 'preflop' && game.phase !== 'flop' && game.phase !== 'turn') {
+    return;
+  }
+  // Do not allow calling time on yourself
+  const currentP = game.players[game.currentPlayerIndex];
+  if (!currentP || currentP.id === myPlayerId) return;
+  // Do not allow if a timer is already active
+  if (game.timeCallStart) return;
+  try {
+    await updateDoc(docRef, {
+      timeCallStart: serverTimestamp(),
+      timeCallBy: myPlayerId,
+      timedPlayerIndex: game.currentPlayerIndex,
+    });
+  } catch (err) {
+    console.error('Error calling time:', err);
+  }
+}
+
+// Automatically handle timeout once 30 seconds have elapsed.  The host
+// detects when the timer expires in the onSnapshot subscription and
+// invokes this function.  If the current player owes chips to call,
+// they are folded; otherwise they automatically check.
+async function autoHandleTimeout(game) {
+  if (!db || !currentGameId) return;
+  const docRef = doc(db, 'games', currentGameId);
+  const idx = game.currentPlayerIndex;
+  const player = game.players[idx];
+  if (!player || player.folded || player.eliminated) {
+    // Clear timer metadata
+    await updateDoc(docRef, {
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
+    });
+    return;
+  }
+  const diff = game.currentBet - (player.bet || 0);
+  if (diff <= 0) {
+    // Auto-check: mark player as having acted and advance turn as needed
+    player.hasActed = true;
+    game.players[idx] = player;
+    const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+    const allActed = activePlayers.every(p => p.hasActed);
+    if (allActed) {
+      // Persist players and pot so that advanceRound sees the updated state
+      await updateDoc(docRef, {
+        players: game.players,
+        pot: game.pot,
+        timeCallStart: null,
+        timeCallBy: null,
+        timedPlayerIndex: null,
+      });
+      // Use a fresh game snapshot for advanceRound to avoid race conditions
+      const snap = await getDoc(docRef);
+      const updatedGame = snap.data();
+      await advanceRound(updatedGame);
+    } else {
+      const nextIdx = nextActiveIndex(game.players, idx);
+      await updateDoc(docRef, {
+        players: game.players,
+        currentPlayerIndex: nextIdx,
+        timeCallStart: null,
+        timeCallBy: null,
+        timedPlayerIndex: null,
+      });
+    }
+  } else {
+    // Auto-fold: fold the current player and proceed similarly to foldAction
+    player.folded = true;
+    player.hasActed = true;
+    game.players[idx] = player;
+    // Determine remaining active players
+    const activeIndices = [];
+    for (let i = 0; i < game.players.length; i++) {
+      const p = game.players[i];
+      if (!p.folded && !p.eliminated) {
+        activeIndices.push(i);
+      }
+    }
+    if (activeIndices.length === 1) {
+      // Award pot to sole remaining player
+      const winnerIdx = activeIndices[0];
+      const potAmount = game.pot;
+      game.players[winnerIdx].chips += potAmount;
+      game.pot = 0;
+      game.phase = 'finished';
+      game.outcomeMessage = `${game.players[winnerIdx].name} wins ${potAmount} chips (all others folded)`;
+      await updateDoc(docRef, {
+        players: game.players,
+        pot: game.pot,
+        phase: game.phase,
+        outcomeMessage: game.outcomeMessage,
+        timeCallStart: null,
+        timeCallBy: null,
+        timedPlayerIndex: null,
+      });
+      return;
+    }
+    // Adjust lastAggressivePlayerIndex if the folded player was the last raiser
+    if (idx === game.lastAggressivePlayerIndex) {
+      let prev = idx;
+      do {
+        prev = (prev - 1 + game.players.length) % game.players.length;
+        if (!game.players[prev].folded && !game.players[prev].eliminated) break;
+      } while (true);
+      game.lastAggressivePlayerIndex = prev;
+    }
+    const activePlayers = game.players.filter(p => !p.folded && !p.eliminated);
+    const allActed = activePlayers.every(p => p.hasActed);
+    if (allActed) {
+      // Persist players and pot before advancing
+      await updateDoc(docRef, {
+        players: game.players,
+        pot: game.pot,
+        lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+        timeCallStart: null,
+        timeCallBy: null,
+        timedPlayerIndex: null,
+      });
+      const snap = await getDoc(docRef);
+      const updatedGame = snap.data();
+      await advanceRound(updatedGame);
+    } else {
+      const nextIdx = nextActiveIndex(game.players, idx);
+      await updateDoc(docRef, {
+        players: game.players,
+        currentPlayerIndex: nextIdx,
+        lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+        timeCallStart: null,
+        timeCallBy: null,
+        timedPlayerIndex: null,
+      });
+    }
+  }
+}
+
+// Check whether a called timer has expired and, if so, apply the appropriate
+// automatic action.  This should only be executed by the host (creatorId),
+// ensuring that only one client processes the timeout logic.
+function checkTimeCall(game) {
+  try {
+    if (!game || !game.timeCallStart) return;
+    if (!game.timedPlayerIndex && game.timedPlayerIndex !== 0) return;
+    if (game.phase !== 'preflop' && game.phase !== 'flop' && game.phase !== 'turn') return;
+    // Only host triggers auto-handling
+    if (game.creatorId !== myPlayerId) return;
+    // Ensure the targeted index still matches the current player
+    if (game.currentPlayerIndex !== game.timedPlayerIndex) return;
+    const startMs = game.timeCallStart.toMillis ? game.timeCallStart.toMillis() : game.timeCallStart;
+    const now = Date.now();
+    const elapsed = now - startMs;
+    if (elapsed >= 30000) {
+      // Timer expired, enforce auto-action
+      autoHandleTimeout(game);
+    }
+  } catch (e) {
+    console.error('Error in checkTimeCall:', e);
   }
 }
 
@@ -876,6 +1135,10 @@ async function advanceRound(game) {
       // specifying this, the pot persists implicitly, but including it
       // ensures clarity and consistency across updates.
       pot: game.pot,
+      // Clear any active time call when a betting round ends
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
   } else if (game.bettingRound === 1) {
     const deck = game.deck;
@@ -898,6 +1161,10 @@ async function advanceRound(game) {
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
       currentPlayerIndex: game.currentPlayerIndex,
       pot: game.pot,
+      // Clear any active time call when a betting round ends
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
   } else if (game.bettingRound === 2) {
     game.phase = 'sniping';
@@ -908,6 +1175,10 @@ async function advanceRound(game) {
       phase: game.phase,
       snipingIndex: game.snipingIndex,
       snipingStartIndex: game.snipingStartIndex,
+      // Clear any active time call when betting ends
+      timeCallStart: null,
+      timeCallBy: null,
+      timedPlayerIndex: null,
     });
   }
 }
@@ -944,6 +1215,14 @@ async function submitSnipe(snipe) {
         });
       }
     }
+  } else {
+    // If no snipe selected (e.g. 'No combination' or 'Noranking card'),
+    // record an explicit no-snipe declaration so that it can be reported.
+    snipes.push({
+      by: myPlayerId,
+      name: myName,
+      noSnipe: true,
+    });
   }
   let nextIdx = nextActiveIndex(game.players, game.snipingIndex);
   if (nextIdx === game.snipingStartIndex) {
@@ -992,6 +1271,10 @@ async function resolveShowdown(game, snipes) {
   if (snipes && snipes.length > 0) {
     const descs = snipes.map(s => {
       if (!s) return '';
+      // Report players who explicitly chose not to snipe
+      if (typeof s === 'object' && s.noSnipe) {
+        return `No snipe declared by ${s.name}`;
+      }
       if (typeof s === 'string') {
         return `5-card hand ${s}`;
       }
@@ -1027,34 +1310,71 @@ async function resolveShowdown(game, snipes) {
       snipeSummary = ' Sniped: ' + descs.join(', ') + '.';
     }
   }
+  // Build a detailed description of the winning combination, including kickers
   let winningDesc = '';
   if (bestRank && bestRank[0] > 0) {
     const cat = bestRank[0];
-    const high = bestRank[1];
+    const descParts = [];
+    // Helper to join kicker values with commas and 'and'
+    const joinKickers = (vals) => {
+      if (!vals || vals.length === 0) return '';
+      if (vals.length === 1) return `${vals[0]}`;
+      if (vals.length === 2) return `${vals[0]} and ${vals[1]}`;
+      const last = vals[vals.length - 1];
+      return `${vals.slice(0, -1).join(', ')} and ${last}`;
+    };
     switch (cat) {
-      case 7:
-        winningDesc = `Four of a Kind (${high})`;
+      case 7: {
+        const quad = bestRank[1];
+        const kicker = bestRank[2];
+        descParts.push(`Four of a Kind (${quad})`);
+        if (kicker !== undefined) descParts.push(`kicker ${kicker}`);
         break;
-      case 6:
-        winningDesc = `Full House (trip ${high})`;
+      }
+      case 6: {
+        const trip = bestRank[1];
+        const pair = bestRank[2];
+        descParts.push(`Full House (trip ${trip}, pair ${pair})`);
         break;
-      case 5:
-        winningDesc = `Straight to ${high}`;
+      }
+      case 5: {
+        const high = bestRank[1];
+        descParts.push(`Straight to ${high}`);
         break;
-      case 4:
-        winningDesc = `Three of a Kind (${high})`;
+      }
+      case 4: {
+        const trip = bestRank[1];
+        const kickers = bestRank.slice(2).filter(v => v !== undefined);
+        descParts.push(`Three of a Kind (${trip})`);
+        if (kickers.length > 0) descParts.push(`kickers ${joinKickers(kickers)}`);
         break;
-      case 3:
-        winningDesc = `Two Pair (highest ${high})`;
+      }
+      case 3: {
+        const pair1 = bestRank[1];
+        const pair2 = bestRank[2];
+        const kicker = bestRank[3];
+        descParts.push(`Two Pair (${pair1} & ${pair2})`);
+        if (kicker !== undefined) descParts.push(`kicker ${kicker}`);
         break;
-      case 2:
-        winningDesc = `Pair of ${high}s`;
+      }
+      case 2: {
+        const pair = bestRank[1];
+        const kickers = bestRank.slice(2).filter(v => v !== undefined);
+        descParts.push(`Pair of ${pair}s`);
+        if (kickers.length > 0) descParts.push(`kickers ${joinKickers(kickers)}`);
         break;
-      default:
-        winningDesc = `High Card ${high}`;
+      }
+      default: {
+        const high = bestRank[1];
+        const kickers = bestRank.slice(2).filter(v => v !== undefined);
+        descParts.push(`High Card ${high}`);
+        if (kickers.length > 0) descParts.push(`kickers ${joinKickers(kickers)}`);
         break;
+      }
     }
-    winningDesc = ' Winning combination: ' + winningDesc + '.';
+    if (descParts.length > 0) {
+      winningDesc = ' Winning combination: ' + descParts.join(' with ') + '.';
+    }
   }
   outcome = outcome + snipeSummary + winningDesc;
   game.pot = 0;
@@ -1070,24 +1390,30 @@ async function resolveShowdown(game, snipes) {
       p.eliminated = true;
     }
   });
+  // Determine if the game is over: when only one player has chips remaining
   let gameOver = false;
   let overallWinner = null;
-  updatedPlayers.forEach(p => {
-    if (p.chips >= 75) {
-      gameOver = true;
-      overallWinner = p;
-    }
-  });
-  await updateDoc(docRef, {
+  const playersWithChips = updatedPlayers.filter(p => p.chips > 0 && !p.eliminated);
+  if (playersWithChips.length <= 1) {
+    gameOver = true;
+    overallWinner = playersWithChips.length === 1 ? playersWithChips[0] : null;
+  }
+  // Prepare fields to update on Firestore, including clearing any timer metadata
+  const updateObj = {
     players: updatedPlayers,
     pot: game.pot,
     phase: 'finished',
     outcomeMessage: outcome,
     gameOver: gameOver,
-  });
+    timeCallStart: null,
+    timeCallBy: null,
+    timedPlayerIndex: null,
+  };
+  await updateDoc(docRef, updateObj);
+  // If the game is over, set a final outcome message announcing the champion
   if (gameOver && overallWinner) {
     await updateDoc(docRef, {
-      outcomeMessage: `${overallWinner.name} has reached 75 chips and wins the game!`,
+      outcomeMessage: `${overallWinner.name} wins the game!`,
     });
   }
 }
@@ -1105,6 +1431,13 @@ raiseBtn.addEventListener('click', () => {
 foldBtn.addEventListener('click', () => {
   foldAction();
 });
+
+// When a player wants to place a timer on the current player, callTimeAction
+if (callTimeBtn) {
+  callTimeBtn.addEventListener('click', () => {
+    callTimeAction();
+  });
+}
 
 // Handle create game
 createGameBtn.addEventListener('click', async () => {
