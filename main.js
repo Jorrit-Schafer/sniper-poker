@@ -73,87 +73,6 @@ const snipesDisplay = document.getElementById('snipesDisplay');
 const confirmRaiseBtn = document.getElementById('confirmRaiseBtn');
 const cancelRaiseBtn = document.getElementById('cancelRaiseBtn');
 
-// ====== Timer state for call-time countdown ======
-// When a player calls time on another player, we start a 30-second countdown.
-// The following global variables track the current countdown so that we can
-// update the UI every second.  These will be reset when the timer ends or
-// when a new timer starts.
-let callTimerIntervalId = null;
-let callTimerStartMs = null;
-let callTimerTargetId = null;
-let callTimerTargetName = null;
-let callTimerPlayers = null;
-
-// Update the countdown message displayed in the message area based on the
-// current timer state.  This function calculates how many seconds remain
-// until the automatic action fires and updates the message accordingly.  If
-// the timer has expired, it clears itself.
-function updateCountdownMessage() {
-  if (!callTimerStartMs) return;
-  const now = Date.now();
-  const remaining = Math.max(0, 30000 - (now - callTimerStartMs));
-  const secs = Math.ceil(remaining / 1000);
-  if (!callTimerPlayers) return;
-  // Determine whether this client is the targeted player
-  const targetPlayer = callTimerPlayers.find(p => p && callTimerTargetId && p.id === callTimerTargetId);
-  if (remaining <= 0) {
-    // Timer expired; clear interval and clear message.  Host will handle
-    // automatic action via the onSnapshot handler.
-    if (callTimerIntervalId) {
-      clearInterval(callTimerIntervalId);
-      callTimerIntervalId = null;
-    }
-    callTimerStartMs = null;
-    callTimerTargetId = null;
-    callTimerTargetName = null;
-    callTimerPlayers = null;
-    // Do not clear message here; auto action message will be set separately
-    return;
-  }
-  if (targetPlayer && targetPlayer.id === myPlayerId) {
-    messageArea.textContent = `Time has been called on you! You have ${secs} second${secs !== 1 ? 's' : ''} to act.`;
-  } else {
-    const name = callTimerTargetName || (targetPlayer ? targetPlayer.name : 'Unknown player');
-    messageArea.textContent = `Time called on ${name}. ${secs} second${secs !== 1 ? 's' : ''} remaining.`;
-  }
-}
-
-// Initialise or clear the call-time countdown based on the current game
-// state.  When a timer is active and a new timer is detected (different
-// start time), this function restarts the interval.  When the timer has
-// been cleared in the game state, this function stops the interval and
-// resets all timer state variables.
-function setupCountdown(game) {
-  // If there's an active timer in the game
-  if (game && game.timeCallStart) {
-    const startMs = game.timeCallStart.toMillis ? game.timeCallStart.toMillis() : game.timeCallStart;
-    if (callTimerStartMs !== startMs) {
-      // Timer has changed or started anew
-      if (callTimerIntervalId) {
-        clearInterval(callTimerIntervalId);
-        callTimerIntervalId = null;
-      }
-      callTimerStartMs = startMs;
-      callTimerTargetId = game.players[game.timedPlayerIndex] ? game.players[game.timedPlayerIndex].id : null;
-      callTimerTargetName = game.players[game.timedPlayerIndex] ? game.players[game.timedPlayerIndex].name : null;
-      callTimerPlayers = game.players;
-      // Immediately update the message and then schedule updates every second
-      updateCountdownMessage();
-      callTimerIntervalId = setInterval(updateCountdownMessage, 1000);
-    }
-  } else {
-    // No timer active: clear any existing countdown
-    if (callTimerIntervalId) {
-      clearInterval(callTimerIntervalId);
-      callTimerIntervalId = null;
-    }
-    callTimerStartMs = null;
-    callTimerTargetId = null;
-    callTimerTargetName = null;
-    callTimerPlayers = null;
-  }
-}
-
 // Current user and game identifiers
 let myPlayerId = null;
 let myName = null;
@@ -190,6 +109,25 @@ function nextActiveIndex(players, startIndex) {
     }
   } while (idx !== startIndex);
   return startIndex;
+}
+
+// Compute positions for player seats around the table.
+// Returns an array of objects with `x` and `y` properties representing
+// percentage offsets from the center of the table container.  The oval
+// table uses different radii for the x and y axes to create an ellipse.
+function getSeatPositions(num) {
+  const positions = [];
+  if (num <= 0) return positions;
+  const angleOffset = -90; // Start from the top of the circle
+  const xRadius = 45;      // Horizontal radius (percentage of container)
+  const yRadius = 35;      // Vertical radius (percentage of container)
+  for (let i = 0; i < num; i++) {
+    const angle = (angleOffset + (360 / num) * i) * Math.PI / 180;
+    const x = 50 + xRadius * Math.cos(angle);
+    const y = 50 + yRadius * Math.sin(angle);
+    positions.push({ x, y });
+  }
+  return positions;
 }
 
 // Utility: evaluate the rank of a 5‑card hand
@@ -389,49 +327,85 @@ function renderGame(game) {
   } else {
     callBtn.textContent = 'Call';
   }
+  // Render community cards in the table center.
   communityCardsDiv.innerHTML = '';
-  for (let i = 0; i < game.communityCards.length; i++) {
-    const cardVal = game.communityCards[i];
+  game.communityCards.forEach(val => {
     const cardEl = document.createElement('div');
     cardEl.className = 'card';
-    cardEl.textContent = cardVal;
+    cardEl.textContent = val;
+    // Apply community-card styling for central cards
+    cardEl.classList.add('community-card');
     communityCardsDiv.appendChild(cardEl);
-  }
+  });
+  // Clear hole cards display (no longer used in new layout)
   holeCardsDiv.innerHTML = '';
-  if (myPlayer && myPlayer.hole) {
-    myPlayer.hole.forEach(val => {
-      const c = document.createElement('div');
-      c.className = 'card';
-      c.textContent = val;
-      holeCardsDiv.appendChild(c);
-    });
-  }
-  playersArea.innerHTML = '';
+  // Render player seats around the poker table
+  const tableEl = document.getElementById('pokerTable');
+  const oldSeats = tableEl.querySelectorAll('.player-seat');
+  oldSeats.forEach(el => el.remove());
+  const positions = getSeatPositions(game.players.length);
   game.players.forEach((p, idx) => {
-    const div = document.createElement('div');
-    div.className = 'player';
+    const seat = document.createElement('div');
+    seat.className = 'player-seat';
     if (idx === game.currentPlayerIndex && game.phase !== 'sniping' && game.phase !== 'showdown' && game.phase !== 'finished') {
-      div.classList.add('current-turn');
+      seat.classList.add('current-turn');
     }
-    if (p.folded) {
-      div.classList.add('folded');
+    if (p.folded) seat.classList.add('folded');
+    if (p.eliminated) seat.classList.add('eliminated');
+    const pos = positions[idx];
+    seat.style.left = pos.x + '%';
+    seat.style.top = pos.y + '%';
+    // Cards container
+    const cardsContainer = document.createElement('div');
+    cardsContainer.className = 'cards';
+    const showCards = (p.id === myPlayerId) || ((game.phase === 'showdown' || game.phase === 'finished') && !p.folded);
+    if (p.hole && p.hole.length === 2) {
+      p.hole.forEach(val2 => {
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'card';
+        if (showCards) {
+          cardDiv.textContent = val2;
+        } else {
+          cardDiv.classList.add('back');
+        }
+        cardsContainer.appendChild(cardDiv);
+      });
+    } else {
+      for (let j = 0; j < 2; j++) {
+        const cardDiv = document.createElement('div');
+        cardDiv.className = 'card back';
+        cardsContainer.appendChild(cardDiv);
+      }
     }
-    let infoHtml = `<strong>${p.name}</strong><br>Chips: ${p.chips}<br>Bet: ${p.bet}`;
-    if ((game.phase === 'showdown' || game.phase === 'finished') && p.hole && p.hole.length === 2) {
-      const holeStr = p.hole.join(' ');
-      infoHtml += `<br>Cards: ${holeStr}`;
+    seat.appendChild(cardsContainer);
+    // Player info
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'player-info';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'name';
+    nameDiv.textContent = p.name;
+    const chipsDiv = document.createElement('div');
+    chipsDiv.className = 'chips';
+    chipsDiv.textContent = `Chips: ${p.chips}`;
+    infoDiv.appendChild(nameDiv);
+    infoDiv.appendChild(chipsDiv);
+    seat.appendChild(infoDiv);
+    // Bet display
+    if (p.bet && p.bet > 0) {
+      const betDiv = document.createElement('div');
+      betDiv.className = 'bet';
+      const chipIcon = document.createElement('span');
+      chipIcon.className = 'chip-icon';
+      betDiv.appendChild(chipIcon);
+      const betVal = document.createElement('span');
+      betVal.textContent = p.bet;
+      betDiv.appendChild(betVal);
+      seat.appendChild(betDiv);
     }
-    div.innerHTML = infoHtml;
-    playersArea.appendChild(div);
+    tableEl.appendChild(seat);
   });
   messageArea.textContent = '';
   if (snipesDisplay) snipesDisplay.textContent = '';
-  // Update or clear any active call-time countdown based on the latest game state.
-  // The call timer feature allows any player to call time on another player, giving
-  // them 30 seconds to act.  The `setupCountdown` function checks whether
-  // a timer is active (via game.timeCallStart) and starts or stops a local
-  // interval accordingly, updating the message area with a live countdown.
-  setupCountdown(game);
   callBtn.disabled = true;
   raiseBtn.disabled = true;
   // Hide and disable the raise controls by default. These will be
