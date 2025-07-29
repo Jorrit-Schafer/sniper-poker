@@ -82,7 +82,8 @@
             <button id="snipeBtn" style="display:none;">Declare Snipe</button>
             <input type="text" id="snipeInput" placeholder="e.g. 6-7-8-9-10" style="display:none;">
             <select id="snipeComboSelect" style="display:none;">
-                <option value="">Choose combination</option>
+                <!-- The first option allows players to explicitly declare that they are not sniping any combination. -->
+                <option value="">No combination sniped</option>
                 <option value="7">Four of a Kind</option>
                 <option value="6">Full House</option>
                 <option value="5">Straight</option>
@@ -92,7 +93,8 @@
                 <option value="1">High Card</option>
             </select>
             <select id="snipeHighSelect" style="display:none;">
-                <option value="">Highest card</option>
+                <!-- The first option allows players to skip choosing a high card when not sniping a combo. -->
+                <option value="">No highest ranking card sniped</option>
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="3">3</option>
@@ -105,6 +107,8 @@
                 <option value="10">10</option>
             </select>
             <button id="submitSnipeBtn" style="display:none;">Submit Snipe</button>
+            <!-- Button for calling time on another player. It will be shown when appropriate during a hand. -->
+            <button id="callTimeBtn" style="display:none;">Call Time</button>
         </div>
         <!-- Area to display declared snipes -->
         <div id="snipesDisplay" class="snipes-display"></div>
