@@ -48,6 +48,8 @@ const createGameBtn = document.getElementById('createGameBtn');
 const joinGameBtn = document.getElementById('joinGameBtn');
 const gameIdInput = document.getElementById('gameIdInput');
 const lobbyStatus = document.getElementById('lobbyStatus');
+// Container to hold the start game button in the lobby
+const startGameContainer = document.getElementById('startGameContainer');
 
 // Game area elements
 const playerNameSpan = document.getElementById('playerName');
@@ -97,6 +99,78 @@ function shuffle(array) {
   }
 }
 
+// Utility: calculate seat coordinates around an oval table.
+// Returns an array of {x, y} objects where x and y are percentages (0-100).
+// Players are spaced evenly around the ellipse with the top seat first and
+// proceeding clockwise.  This function supports up to 9 players.
+function getSeatPositions(numPlayers) {
+  const positions = [];
+  // Limit number of seats to at least 2 and maximum 9
+  const count = Math.max(2, Math.min(numPlayers, 9));
+  // Choose a starting angle at -90 degrees (top) so the first seat is at
+  // the top of the table. Seats then proceed clockwise around the circle.
+  for (let i = 0; i < count; i++) {
+    const angleDeg = -90 + (360 * i / count);
+    const angleRad = angleDeg * Math.PI / 180;
+    // The x-radius and y-radius percentages determine how far from center
+    // the seats are placed.  Adjust these values to tweak the oval shape.
+    const xRadius = 40;    // horizontal radius in percentage of table width
+    const yRadius = 28;    // vertical radius in percentage of table height
+    const x = 50 + xRadius * Math.cos(angleRad);
+    const y = 50 + yRadius * Math.sin(angleRad);
+    positions.push({ x, y });
+  }
+  return positions;
+}
+
+// Countdown timer state used when a player calls time on another.
+// When active, an interval updates the message area every second to show
+// remaining time before an automatic action occurs.  If no time call is
+// active, the interval is cleared.  These variables and functions are
+// lightweight stubs to avoid runtime errors if the game does not support
+// time calls.  You can extend this logic if your backend provides
+// properties like `timeCallStart` and `timeCallTarget` on the game object.
+let callTimerIntervalId = null;
+
+function setupCountdown(game) {
+  // Clear any previous countdown interval
+  if (callTimerIntervalId) {
+    clearInterval(callTimerIntervalId);
+    callTimerIntervalId = null;
+  }
+  // Check if the game object contains timing information.  If not,
+  // simply return.  This prevents errors when the feature is unused.
+  if (!game || game.timeCallStart === undefined || game.timeCallTarget === undefined) {
+    return;
+  }
+  // Determine the targeted player and the countdown duration.  If either
+  // value is missing, do not start a timer.
+  const startMs = game.timeCallStart;
+  const targetId = game.timeCallTarget;
+  const durationMs = game.timeCallDuration || 30000;
+  if (!startMs || !targetId) return;
+  // Compute initial remaining time
+  function update() {
+    const now = Date.now();
+    const elapsed = now - startMs;
+    const remainingMs = Math.max(durationMs - elapsed, 0);
+    const remainingSec = Math.ceil(remainingMs / 1000);
+    // Display a generic countdown message for the targeted player
+    const targetPlayer = (game.players || []).find(p => p.id === targetId);
+    let name = targetPlayer ? targetPlayer.name : 'Player';
+    if (remainingMs > 0) {
+      messageArea.textContent = `${name} has ${remainingSec} seconds to act.`;
+    } else {
+      messageArea.textContent = `${name} ran out of time.`;
+      clearInterval(callTimerIntervalId);
+      callTimerIntervalId = null;
+    }
+  }
+  // Run update immediately and schedule interval
+  update();
+  callTimerIntervalId = setInterval(update, 1000);
+}
+
 // Utility: compute next active player's index
 function nextActiveIndex(players, startIndex) {
   if (!players || players.length === 0) return 0;
@@ -109,25 +183,6 @@ function nextActiveIndex(players, startIndex) {
     }
   } while (idx !== startIndex);
   return startIndex;
-}
-
-// Compute positions for player seats around the table.
-// Returns an array of objects with `x` and `y` properties representing
-// percentage offsets from the center of the table container.  The oval
-// table uses different radii for the x and y axes to create an ellipse.
-function getSeatPositions(num) {
-  const positions = [];
-  if (num <= 0) return positions;
-  const angleOffset = -90; // Start from the top of the circle
-  const xRadius = 45;      // Horizontal radius (percentage of container)
-  const yRadius = 35;      // Vertical radius (percentage of container)
-  for (let i = 0; i < num; i++) {
-    const angle = (angleOffset + (360 / num) * i) * Math.PI / 180;
-    const x = 50 + xRadius * Math.cos(angle);
-    const y = 50 + yRadius * Math.sin(angle);
-    positions.push({ x, y });
-  }
-  return positions;
 }
 
 // Utility: evaluate the rank of a 5‑card hand
@@ -271,14 +326,12 @@ function renderLobby(game) {
   const isHost = (game.creatorId === myPlayerId);
   let startBtn = document.getElementById('startGameBtn');
   if (isHost && game.players.length >= 2 && !game.started) {
+    // Create the start button if it doesn't exist
     if (!startBtn) {
       startBtn = document.createElement('button');
       startBtn.id = 'startGameBtn';
       startBtn.textContent = 'Start Game';
       startBtn.onclick = async () => {
-        // Before starting the hand, fetch the latest game data from
-        // Firestore to avoid using a stale snapshot.  Only proceed if we
-        // have a valid game ID; otherwise there's no document to fetch.
         if (!currentGameId) {
           console.warn('No currentGameId set when starting the game.');
           return;
@@ -289,20 +342,25 @@ function renderLobby(game) {
           if (snap.exists()) {
             await startHand(snap.data());
           } else {
-            // Fallback: if the document does not exist, call startHand() with
-            // no argument so it can decide how to proceed.
             await startHand();
           }
         } catch (err) {
           console.error('Error fetching game before start:', err);
-          // Attempt to start with whatever context startHand can obtain.
           await startHand();
         }
       };
+    }
+    // Clear any existing children and append the start button to the dedicated container
+    if (startGameContainer) {
+      startGameContainer.innerHTML = '';
+      startGameContainer.appendChild(startBtn);
+    } else {
       lobbyDiv.appendChild(startBtn);
     }
   } else {
+    // Remove the button if the host is no longer allowed to start
     if (startBtn) startBtn.remove();
+    if (startGameContainer) startGameContainer.innerHTML = '';
   }
 }
 
@@ -327,85 +385,85 @@ function renderGame(game) {
   } else {
     callBtn.textContent = 'Call';
   }
-  // Render community cards in the table center.
+  // --- New table-based rendering ---
+  // Render community cards in the center of the table
   communityCardsDiv.innerHTML = '';
   game.communityCards.forEach(val => {
     const cardEl = document.createElement('div');
-    cardEl.className = 'card';
+    cardEl.className = 'card community-card';
     cardEl.textContent = val;
-    // Apply community-card styling for central cards
-    cardEl.classList.add('community-card');
     communityCardsDiv.appendChild(cardEl);
   });
-  // Clear hole cards display (no longer used in new layout)
-  holeCardsDiv.innerHTML = '';
-  // Render player seats around the poker table
+
+  // Render player seats around the oval table
   const tableEl = document.getElementById('pokerTable');
-  const oldSeats = tableEl.querySelectorAll('.player-seat');
-  oldSeats.forEach(el => el.remove());
-  const positions = getSeatPositions(game.players.length);
-  game.players.forEach((p, idx) => {
-    const seat = document.createElement('div');
-    seat.className = 'player-seat';
-    if (idx === game.currentPlayerIndex && game.phase !== 'sniping' && game.phase !== 'showdown' && game.phase !== 'finished') {
-      seat.classList.add('current-turn');
-    }
-    if (p.folded) seat.classList.add('folded');
-    if (p.eliminated) seat.classList.add('eliminated');
-    const pos = positions[idx];
-    seat.style.left = pos.x + '%';
-    seat.style.top = pos.y + '%';
-    // Cards container
-    const cardsContainer = document.createElement('div');
-    cardsContainer.className = 'cards';
-    const showCards = (p.id === myPlayerId) || ((game.phase === 'showdown' || game.phase === 'finished') && !p.folded);
-    if (p.hole && p.hole.length === 2) {
-      p.hole.forEach(val2 => {
-        const cardDiv = document.createElement('div');
-        cardDiv.className = 'card';
-        if (showCards) {
-          cardDiv.textContent = val2;
-        } else {
-          cardDiv.classList.add('back');
-        }
-        cardsContainer.appendChild(cardDiv);
-      });
-    } else {
-      for (let j = 0; j < 2; j++) {
-        const cardDiv = document.createElement('div');
-        cardDiv.className = 'card back';
-        cardsContainer.appendChild(cardDiv);
+  if (tableEl) {
+    const oldSeats = tableEl.querySelectorAll('.player-seat');
+    oldSeats.forEach(el => el.remove());
+    const positions = getSeatPositions(game.players.length);
+    game.players.forEach((p, idx) => {
+      const seat = document.createElement('div');
+      seat.className = 'player-seat';
+      if (idx === game.currentPlayerIndex && game.phase !== 'sniping' && game.phase !== 'showdown' && game.phase !== 'finished') {
+        seat.classList.add('current-turn');
       }
-    }
-    seat.appendChild(cardsContainer);
-    // Player info
-    const infoDiv = document.createElement('div');
-    infoDiv.className = 'player-info';
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'name';
-    nameDiv.textContent = p.name;
-    const chipsDiv = document.createElement('div');
-    chipsDiv.className = 'chips';
-    chipsDiv.textContent = `Chips: ${p.chips}`;
-    infoDiv.appendChild(nameDiv);
-    infoDiv.appendChild(chipsDiv);
-    seat.appendChild(infoDiv);
-    // Bet display
-    if (p.bet && p.bet > 0) {
-      const betDiv = document.createElement('div');
-      betDiv.className = 'bet';
-      const chipIcon = document.createElement('span');
-      chipIcon.className = 'chip-icon';
-      betDiv.appendChild(chipIcon);
-      const betVal = document.createElement('span');
-      betVal.textContent = p.bet;
-      betDiv.appendChild(betVal);
-      seat.appendChild(betDiv);
-    }
-    tableEl.appendChild(seat);
-  });
+      if (p.folded) seat.classList.add('folded');
+      if (p.eliminated) seat.classList.add('eliminated');
+      const pos = positions[idx];
+      seat.style.left = pos.x + '%';
+      seat.style.top = pos.y + '%';
+      // cards
+      const cardsContainer = document.createElement('div');
+      cardsContainer.className = 'cards';
+      const showCards = (p.id === myPlayerId) || ((game.phase === 'showdown' || game.phase === 'finished') && !p.folded);
+      if (p.hole && p.hole.length === 2) {
+        p.hole.forEach(val2 => {
+          const cardDiv = document.createElement('div');
+          cardDiv.className = 'card';
+          if (showCards) cardDiv.textContent = val2;
+          else cardDiv.classList.add('back');
+          cardsContainer.appendChild(cardDiv);
+        });
+      } else {
+        for (let j = 0; j < 2; j++) {
+          const cardDiv = document.createElement('div');
+          cardDiv.className = 'card back';
+          cardsContainer.appendChild(cardDiv);
+        }
+      }
+      seat.appendChild(cardsContainer);
+      // name and chips
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'player-info';
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'name';
+      nameDiv.textContent = p.name;
+      const chipsDiv = document.createElement('div');
+      chipsDiv.className = 'chips';
+      chipsDiv.textContent = `Chips: ${p.chips}`;
+      infoDiv.appendChild(nameDiv);
+      infoDiv.appendChild(chipsDiv);
+      seat.appendChild(infoDiv);
+      // bet
+      if (p.bet && p.bet > 0) {
+        const betDiv = document.createElement('div');
+        betDiv.className = 'bet';
+        const chipIcon = document.createElement('span');
+        chipIcon.className = 'chip-icon';
+        betDiv.appendChild(chipIcon);
+        const betVal = document.createElement('span');
+        betVal.textContent = p.bet;
+        betDiv.appendChild(betVal);
+        seat.appendChild(betDiv);
+      }
+      tableEl.appendChild(seat);
+    });
+  }
+
+  // Clear the message and snipes display, and update the countdown timer
   messageArea.textContent = '';
   if (snipesDisplay) snipesDisplay.textContent = '';
+  setupCountdown(game);
   callBtn.disabled = true;
   raiseBtn.disabled = true;
   // Hide and disable the raise controls by default. These will be
