@@ -176,15 +176,14 @@ button:active:not(:disabled) {
     position: relative;
     width: 100%;
     height: 100%;
-    /* Use a photographic poker table image to enhance realism. The
-       supplied image "poker table.png" includes the felt surface and
-       padded rail. Scale it to cover the entire table area while
-       maintaining the oval shape. */
-    background: url('poker table.png') center/cover no-repeat;
+    /* Use a radial gradient to simulate the felt surface with a darker
+       rim and a lighter centre, similar to professional poker tables. */
+    background: radial-gradient(circle at center, #248a3b 0%, #0b4f23 60%, #052813 100%);
+    /* Apply a subtle inner shadow to emphasize the padded rail and a white
+       outer ring to mimic the highlight seen in the reference image. */
     border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    /* Remove the previous thick border since the image already
-       includes its own rail and edge. */
-    border: none;
+    border: 8px solid #2e2e2e;
+    box-shadow: 0 0 0 8px rgba(255,255,255,0.9), inset 0 4px 8px rgba(0,0,0,0.6);
     overflow: hidden;
 }
 
@@ -213,14 +212,19 @@ button:active:not(:disabled) {
 }
 
 /* Seat representing a player around the table */
+/* Player seat container: holds cards and the player info bar.  It is
+   positioned absolutely around the table ellipse.  Increase the
+   default width to allow space for the avatar, name and chips. */
 .player-seat {
     position: absolute;
-    width: 90px;
-    text-align: center;
+    width: 140px;
     transform: translate(-50%, -50%);
     z-index: 2;
     color: #fff;
     font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 /* highlight active player's seat */
 .player-seat.current-turn {
@@ -235,14 +239,17 @@ button:active:not(:disabled) {
 }
 
 /* Cards within each seat */
+/* Cards for each player.  Increase card size slightly for better
+   readability on the larger seat.  Cards appear above the info bar. */
 .player-seat .cards {
     display: flex;
     justify-content: center;
-    gap: 3px;
+    gap: 4px;
+    margin-bottom: 4px;
 }
 .player-seat .cards .card {
-    width: 32px;
-    height: 48px;
+    width: 38px;
+    height: 56px;
     border: 1px solid #999;
     border-radius: 4px;
     background: #fff;
@@ -260,34 +267,75 @@ button:active:not(:disabled) {
 }
 
 /* Player info (name and chips) */
+/* Player info bar styled to resemble the dark panels in the reference
+   image.  It contains an avatar and two lines for name and chips. */
 .player-seat .player-info {
-    margin-top: 3px;
-    font-size: 0.7rem;
-    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 8px;
+    padding: 3px 6px;
+    min-height: 32px;
+    width: 100%;
+}
+.player-seat .player-info .avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #ddd, #bbb);
+    position: relative;
+    flex-shrink: 0;
+}
+.player-seat .player-info .avatar::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -40%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #888;
+}
+.player-seat .player-info .details {
+    display: flex;
+    flex-direction: column;
     line-height: 1.1;
 }
-.player-seat .player-info .name {
+.player-seat .player-info .details .name {
     font-weight: bold;
+    font-size: 0.75rem;
 }
-.player-seat .player-info .chips {
-    font-style: italic;
+.player-seat .player-info .details .chips {
+    font-size: 0.7rem;
+    color: #ccc;
 }
 
 /* Bet display with chip icon */
+/* Bet stack representation: show coloured chip icons for each unit bet (up to 5).
+   These stacks appear just below the cards, mimicking chip piles on the table. */
 .player-seat .bet {
     margin-top: 2px;
-    font-size: 0.7rem;
-    color: #ffc107;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: 2px;
+    min-height: 0;
 }
-.player-seat .chip-icon {
+.player-seat .bet .chip-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.player-seat .bet .chip-icon {
     width: 12px;
     height: 12px;
-    margin-right: 3px;
     border-radius: 50%;
     background: radial-gradient(circle at 30% 30%, #ffe066 0%, #f2a900 60%, #c58d00 100%);
+    border: 1px solid rgba(0,0,0,0.3);
 }
 
 /* Ensure action area and message area are spaced relative to table */
