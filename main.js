@@ -517,7 +517,10 @@ function renderGame(game) {
       const pos = positions[seatIndex];
       seat.style.left = pos.x + '%';
       seat.style.top = pos.y + '%';
-      // cards
+      // --- cards ---
+      // Create a container for the player's hole cards. Cards are displayed
+      // face-up when the player is me or during showdown/finished phases;
+      // otherwise they are shown face-down.
       const cardsContainer = document.createElement('div');
       cardsContainer.className = 'cards';
       const showCards = (p.id === myPlayerId) || ((game.phase === 'showdown' || game.phase === 'finished') && !p.folded);
@@ -530,6 +533,7 @@ function renderGame(game) {
           cardsContainer.appendChild(cardDiv);
         });
       } else {
+        // Render placeholder backs when no hole cards yet assigned
         for (let j = 0; j < 2; j++) {
           const cardDiv = document.createElement('div');
           cardDiv.className = 'card back';
@@ -537,27 +541,49 @@ function renderGame(game) {
         }
       }
       seat.appendChild(cardsContainer);
-      // name and chips
+
+      // --- player info bar ---
+      // Create a dark bar containing the player's avatar, name and chip count.
       const infoDiv = document.createElement('div');
       infoDiv.className = 'player-info';
+      // Avatar: static placeholder circle
+      const avatar = document.createElement('div');
+      avatar.className = 'avatar';
+      infoDiv.appendChild(avatar);
+      // Details container for name and chips
+      const details = document.createElement('div');
+      details.className = 'details';
       const nameDiv = document.createElement('div');
       nameDiv.className = 'name';
       nameDiv.textContent = p.name;
       const chipsDiv = document.createElement('div');
       chipsDiv.className = 'chips';
       chipsDiv.textContent = `Chips: ${p.chips}`;
-      infoDiv.appendChild(nameDiv);
-      infoDiv.appendChild(chipsDiv);
+      details.appendChild(nameDiv);
+      details.appendChild(chipsDiv);
+      infoDiv.appendChild(details);
       seat.appendChild(infoDiv);
-      // bet
+
+      // --- bet stack ---
+      // When the player has an active bet, display a stack of chip icons
+      // along with the numeric bet value.  Stack height is capped for large bets.
       if (p.bet && p.bet > 0) {
         const betDiv = document.createElement('div');
         betDiv.className = 'bet';
-        const chipIcon = document.createElement('span');
-        chipIcon.className = 'chip-icon';
-        betDiv.appendChild(chipIcon);
+        const stack = document.createElement('div');
+        stack.className = 'chip-stack';
+        const maxChipsToShow = Math.min(p.bet, 5);
+        for (let i = 0; i < maxChipsToShow; i++) {
+          const chipIcon = document.createElement('span');
+          chipIcon.className = 'chip-icon';
+          stack.appendChild(chipIcon);
+        }
+        betDiv.appendChild(stack);
         const betVal = document.createElement('span');
         betVal.textContent = p.bet;
+        betVal.style.marginTop = '2px';
+        betVal.style.fontSize = '0.7rem';
+        betVal.style.color = '#ffd24a';
         betDiv.appendChild(betVal);
         seat.appendChild(betDiv);
       }
