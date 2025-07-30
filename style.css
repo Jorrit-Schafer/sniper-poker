@@ -57,23 +57,42 @@ input[type="text"], input[type="number"] {
 }
 
 button {
-    padding: 8px 14px;
+    /* Increase padding and border for a more substantial feel.  Use a
+       green gradient reminiscent of poker tables and a subtle shadow
+       for depth. */
+    padding: 8px 16px;
     font-size: 1rem;
-    border: none;
-    border-radius: 4px;
-    background: #007bff;
-    color: white;
+    border: 2px solid #352d1b;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #377e22, #234d17);
+    color: #f8f3e8;
     cursor: pointer;
-    transition: background 0.2s ease;
+    transition: background 0.2s ease, transform 0.1s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
 button:disabled {
-    opacity: 0.5;
+    opacity: 0.6;
     cursor: not-allowed;
 }
 
 button:not(:disabled):hover {
-    background: #0056b3;
+    background: linear-gradient(180deg, #408c27, #2a5a1a);
+}
+
+button:active:not(:disabled) {
+    /* Create a pressed effect on click */
+    transform: translateY(1px);
+}
+
+/* Special styling for the call time button to stand out with a
+   cautionary red tone. */
+#callTimeBtn {
+    background: linear-gradient(180deg, #b33a3a, #7a2b2b);
+    border-color: #571a1a;
+}
+#callTimeBtn:not(:disabled):hover {
+    background: linear-gradient(180deg, #c24444, #8a3030);
 }
 
 /* When the actual game area is visible, revert text to dark for
@@ -157,9 +176,15 @@ button:not(:disabled):hover {
     position: relative;
     width: 100%;
     height: 100%;
-    background: radial-gradient(ellipse at center, #115c2f 0%, #0a3e1a 100%);
+    /* Use a photographic poker table image to enhance realism. The
+       supplied image "poker table.png" includes the felt surface and
+       padded rail. Scale it to cover the entire table area while
+       maintaining the oval shape. */
+    background: url('poker table.png') center/cover no-repeat;
     border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    border: 8px solid #4b2e17;
+    /* Remove the previous thick border since the image already
+       includes its own rail and edge. */
+    border: none;
     overflow: hidden;
 }
 
