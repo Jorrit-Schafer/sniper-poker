@@ -182,8 +182,9 @@ button:active:not(:disabled) {
     /* Apply a subtle inner shadow to emphasize the padded rail and a white
        outer ring to mimic the highlight seen in the reference image. */
     border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
-    border: 8px solid #2e2e2e;
-    box-shadow: 0 0 0 8px rgba(255,255,255,0.9), inset 0 4px 8px rgba(0,0,0,0.6);
+    border: 8px solid #1a1a1a;
+    /* Remove the white outer ring; keep only an inner shadow for depth. */
+    box-shadow: inset 0 4px 8px rgba(0,0,0,0.6);
     overflow: hidden;
 }
 
@@ -281,23 +282,32 @@ button:active:not(:disabled) {
     width: 100%;
 }
 .player-seat .player-info .avatar {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: linear-gradient(180deg, #ddd, #bbb);
+    width: 22px;
+    height: 22px;
     position: relative;
     flex-shrink: 0;
+}
+/* Draw a simple person icon using pseudo-elements: a head (circle) and a torso.
+   This provides a clearer avatar representation than a plain circle. */
+.player-seat .player-info .avatar::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
 }
 .player-seat .player-info .avatar::after {
     content: '';
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -40%);
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #888;
+    bottom: 2px;
+    left: 3px;
+    width: 16px;
+    height: 8px;
+    border-radius: 8px 8px 4px 4px;
+    background: #fff;
 }
 .player-seat .player-info .details {
     display: flex;
@@ -319,23 +329,20 @@ button:active:not(:disabled) {
 .player-seat .bet {
     margin-top: 2px;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     min-height: 0;
 }
-.player-seat .bet .chip-stack {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-}
+/* The single chip icon representing a bet.  A gold-coloured circle
+   accompanied by a numeric value indicates the size of the bet. */
 .player-seat .bet .chip-icon {
     width: 12px;
     height: 12px;
     border-radius: 50%;
     background: radial-gradient(circle at 30% 30%, #ffe066 0%, #f2a900 60%, #c58d00 100%);
     border: 1px solid rgba(0,0,0,0.3);
+    display: inline-block;
 }
 
 /* Ensure action area and message area are spaced relative to table */
@@ -344,6 +351,8 @@ button:active:not(:disabled) {
 }
 #messageArea {
     margin-top: 10px;
+    /* Display all game messages (timers, outcomes, etc.) in white for visibility */
+    color: #fff;
 }
 
 .players-area {
@@ -399,6 +408,29 @@ button:active:not(:disabled) {
     color: #d0d0d0;
 }
 
+/* Display snipe declarations in white text for visibility */
+.snipes-display {
+    color: #fff;
+}
+
+/* Hide the status bar at the top as it is no longer needed */
+#statusBar {
+    display: none;
+}
+
+/* Centered pot display beneath the community cards */
+.pot-center {
+    position: absolute;
+    left: 50%;
+    top: 62%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: bold;
+    text-shadow: 0 0 4px rgba(0,0,0,0.7);
+    pointer-events: none;
+}
+
 .action-area {
     display: flex;
     flex-wrap: wrap;
@@ -412,5 +444,6 @@ button:active:not(:disabled) {
     margin-top: 20px;
     min-height: 40px;
     font-size: 0.95rem;
-    color: #333;
+    /* Show messages (e.g., snipes, outcomes) in white for contrast on dark backgrounds */
+    color: #fff;
 }
