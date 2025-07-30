@@ -488,6 +488,11 @@ function renderGame(game) {
     cardEl.textContent = val;
     communityCardsDiv.appendChild(cardEl);
   });
+  // Update the pot display in the centre of the table
+  const potCenterEl = document.getElementById('potCenter');
+  if (potCenterEl) {
+    potCenterEl.textContent = `Pot: ${game.pot}`;
+  }
 
   // Render player seats around the oval table
   const tableEl = document.getElementById('pokerTable');
@@ -564,24 +569,18 @@ function renderGame(game) {
       infoDiv.appendChild(details);
       seat.appendChild(infoDiv);
 
-      // --- bet stack ---
-      // When the player has an active bet, display a stack of chip icons
-      // along with the numeric bet value.  Stack height is capped for large bets.
+      // --- bet display ---
+      // When the player has an active bet, show a single chip icon
+      // followed by the numeric value.  This compact display mirrors
+      // the simplified chip representation requested.
       if (p.bet && p.bet > 0) {
         const betDiv = document.createElement('div');
         betDiv.className = 'bet';
-        const stack = document.createElement('div');
-        stack.className = 'chip-stack';
-        const maxChipsToShow = Math.min(p.bet, 5);
-        for (let i = 0; i < maxChipsToShow; i++) {
-          const chipIcon = document.createElement('span');
-          chipIcon.className = 'chip-icon';
-          stack.appendChild(chipIcon);
-        }
-        betDiv.appendChild(stack);
+        const chipIcon = document.createElement('span');
+        chipIcon.className = 'chip-icon';
+        betDiv.appendChild(chipIcon);
         const betVal = document.createElement('span');
         betVal.textContent = p.bet;
-        betVal.style.marginTop = '2px';
         betVal.style.fontSize = '0.7rem';
         betVal.style.color = '#ffd24a';
         betDiv.appendChild(betVal);
