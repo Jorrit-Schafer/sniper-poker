@@ -70,6 +70,9 @@ const messageArea = document.getElementById('messageArea');
 const snipeComboSelect = document.getElementById('snipeComboSelect');
 const snipeHighSelect = document.getElementById('snipeHighSelect');
 const snipesDisplay = document.getElementById('snipesDisplay');
+// Button used to call time on a slow player. Its appearance is hidden by default and
+// shown when you may call time on another player.
+const callTimeBtn = document.getElementById('callTimeBtn');
 
 // New controls for confirming or cancelling a raise
 const confirmRaiseBtn = document.getElementById('confirmRaiseBtn');
@@ -164,11 +167,102 @@ function setupCountdown(game) {
       messageArea.textContent = `${name} ran out of time.`;
       clearInterval(callTimerIntervalId);
       callTimerIntervalId = null;
+      // When the timer expires, automatically trigger an action on the
+      // targeted player's client. If the current user is the target, they
+      // will automatically check, fold or forfeit their snipe depending on
+      // the phase. The time call fields are also cleared.
+      handleTimeOut(game);
     }
   }
   // Run update immediately and schedule interval
   update();
   callTimerIntervalId = setInterval(update, 1000);
+}
+
+/**
+ * Handle automatic actions when a time call expires. If the current user is
+ * the player that was called on, the correct action (check, fold or snipe
+ * forfeit) will be taken. Regardless of who is targeted, the time call
+ * metadata is cleared from Firestore so that subsequent hands can proceed
+ * without an active timer.
+ * @param {Object} game The most recent game state available when the timer
+ *  was started.
+ */
+async function handleTimeOut(game) {
+  try {
+    if (!game || !game.timeCallTarget) return;
+    const docRef = doc(db, 'games', currentGameId);
+    // Fetch the latest game state to make decisions based on up-to-date data.
+    const snap = await getDoc(docRef);
+    const current = snap.data();
+    if (!current) return;
+    const targetId = current.timeCallTarget;
+    // Clear timer fields in any case so they don't linger into the next action.
+    await updateDoc(docRef, {
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
+    });
+    if (targetId !== myPlayerId) {
+      return;
+    }
+    // Determine the appropriate automatic action for the targeted player.
+    if (current.phase === 'sniping') {
+      // Forfeit the snipe when time runs out in the sniping phase.
+      await submitSnipe('');
+    } else if (current.phase === 'preflop' || current.phase === 'flop' || current.phase === 'turn') {
+      const me = current.players.find(p => p.id === myPlayerId);
+      if (!me) return;
+      const diff = current.currentBet - (me.bet || 0);
+      if (diff <= 0) {
+        await callAction();
+      } else {
+        await foldAction();
+      }
+    }
+  } catch (err) {
+    console.error('Error handling timeout:', err);
+  }
+}
+
+/**
+ * Initiate a time call on the currently acting player. When invoked,
+ * the callTimeBtn will send the current timestamp, targeted player ID and
+ * duration (30 seconds) to Firestore. Other clients will then display a
+ * countdown and automatically act for the targeted player if they fail to
+ * take an action within the allotted time.
+ */
+async function callTimeAction() {
+  try {
+    const docRef = doc(db, 'games', currentGameId);
+    const snap = await getDoc(docRef);
+    const game = snap.data();
+    if (!game) return;
+    // Do not allow a time call during showdown/finished phases or if a timer is already running.
+    if (game.phase === 'showdown' || game.phase === 'finished' || game.timeCallStart) {
+      return;
+    }
+    // Identify the player whose turn or snipe decision is pending.
+    let targetId = null;
+    if (game.phase === 'sniping') {
+      const target = game.players[game.snipingIndex];
+      if (target) targetId = target.id;
+    } else {
+      const target = game.players[game.currentPlayerIndex];
+      if (target) targetId = target.id;
+    }
+    // Do not allow calling time on yourself or if there is no valid target.
+    if (!targetId || targetId === myPlayerId) {
+      return;
+    }
+    await updateDoc(docRef, {
+      timeCallStart: Date.now(),
+      timeCallTarget: targetId,
+      timeCallDuration: 30000,
+    });
+  } catch (err) {
+    console.error('Error calling time:', err);
+  }
 }
 
 // Utility: compute next active player's index
@@ -401,15 +495,26 @@ function renderGame(game) {
     const oldSeats = tableEl.querySelectorAll('.player-seat');
     oldSeats.forEach(el => el.remove());
     const positions = getSeatPositions(game.players.length);
+    // Determine a rotation shift so that the current user is always
+    // rendered at the bottom of the table. The bottom seat index is
+    // calculated as the halfway point around the circle (floor(numPlayers/2)).
+    const nSeats = game.players.length;
+    const myIndexLocal = game.players.findIndex(p => p.id === myPlayerId);
+    const bottomIdx = Math.floor(nSeats / 2);
+    const shift = ((bottomIdx - myIndexLocal) % nSeats + nSeats) % nSeats;
     game.players.forEach((p, idx) => {
       const seat = document.createElement('div');
       seat.className = 'player-seat';
+      // Compute the rotated seat index for positioning.
+      const seatIndex = (idx + shift) % nSeats;
+      // Highlight the current-turn seat (betting rounds only).  Do not
+      // highlight during sniping, showdown or finished phases.
       if (idx === game.currentPlayerIndex && game.phase !== 'sniping' && game.phase !== 'showdown' && game.phase !== 'finished') {
         seat.classList.add('current-turn');
       }
       if (p.folded) seat.classList.add('folded');
       if (p.eliminated) seat.classList.add('eliminated');
-      const pos = positions[idx];
+      const pos = positions[seatIndex];
       seat.style.left = pos.x + '%';
       seat.style.top = pos.y + '%';
       // cards
@@ -479,6 +584,27 @@ function renderGame(game) {
   if (snipeComboSelect) snipeComboSelect.style.display = 'none';
   if (snipeHighSelect) snipeHighSelect.style.display = 'none';
   submitSnipeBtn.style.display = 'none';
+
+  // Reset the call time button visibility.  It will be enabled only when it
+  // is another player's turn to act or snipe and no countdown is already in
+  // progress.  By default the button is hidden and disabled.
+  if (callTimeBtn) {
+    callTimeBtn.style.display = 'none';
+    callTimeBtn.disabled = true;
+    if (['preflop', 'flop', 'turn'].includes(game.phase)) {
+      const acting = game.players[game.currentPlayerIndex];
+      if (acting && acting.id !== myPlayerId && !acting.folded && !acting.eliminated) {
+        callTimeBtn.style.display = '';
+        callTimeBtn.disabled = !!game.timeCallStart;
+      }
+    } else if (game.phase === 'sniping') {
+      const acting = game.players[game.snipingIndex];
+      if (acting && acting.id !== myPlayerId && !acting.folded && !acting.eliminated) {
+        callTimeBtn.style.display = '';
+        callTimeBtn.disabled = !!game.timeCallStart;
+      }
+    }
+  }
   if (game.phase === 'preflop' || game.phase === 'flop' || game.phase === 'turn') {
     if (game.players[game.currentPlayerIndex] && game.players[game.currentPlayerIndex].id === myPlayerId) {
       if (!myPlayer.folded) {
@@ -547,39 +673,53 @@ function renderGame(game) {
       if (snipesArr.length === 0) {
         snipesDisplay.textContent = 'No snipes declared yet.';
       } else {
-        const descriptions = snipesArr.map(s => {
+        // Build a list of display lines for each snipe.  Show a default
+        // message when a player forfeits their snipe or declares no
+        // combination/card.  Each line is rendered on its own row.
+        const lines = snipesArr.map(s => {
+          if (!s) return '';
+          // When the snipe is a string, it represents a 5-card hand pattern.
           if (typeof s === 'string') {
             return `5-card hand ${s}`;
           }
-          const cat = s.category;
-          const val = s.value;
+          // When an object lacks a category/value or explicitly has a
+          // 'none' flag, treat it as a forfeited declaration.
+          if (!s.category || !s.value || s.none) {
+            return `No snipe declared by ${s.name}`;
+          }
           let desc;
-          switch (cat) {
+          switch (s.category) {
             case 7:
-              desc = `Four of a Kind (${val})`;
+              desc = `Four of a Kind (${s.value})`;
               break;
             case 6:
-              desc = `Full House (trip ${val})`;
+              desc = `Full House (trip ${s.value})`;
               break;
             case 5:
-              desc = `Straight to ${val}`;
+              desc = `Straight to ${s.value}`;
               break;
             case 4:
-              desc = `Three of a Kind (${val})`;
+              desc = `Three of a Kind (${s.value})`;
               break;
             case 3:
-              desc = `Two Pair (highest ${val})`;
+              desc = `Two Pair (highest ${s.value})`;
               break;
             case 2:
-              desc = `Pair of ${val}s`;
+              desc = `Pair of ${s.value}s`;
               break;
             default:
-              desc = `High Card ${val}`;
+              desc = `High Card ${s.value}`;
               break;
           }
           return `${desc} by ${s.name}`;
-        });
-        snipesDisplay.textContent = 'Declared snipes: ' + descriptions.join(', ');
+        }).filter(Boolean);
+        // Combine into an HTML string with separate rows.  Include a heading
+        // so players know what the list refers to.
+        if (lines.length > 0) {
+          snipesDisplay.innerHTML = '<strong>Declared snipes:</strong><br>' + lines.map(l => `<div>${l}</div>`).join('');
+        } else {
+          snipesDisplay.textContent = '';
+        }
       }
     }
     if (game.snipingIndex !== undefined && game.players[game.snipingIndex] && game.players[game.snipingIndex].id === myPlayerId) {
@@ -836,6 +976,10 @@ async function callAction() {
     await updateDoc(docRef, {
       players: game.players,
       pot: game.pot,
+      // Clear any active time call when a player acts
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
     await advanceRound(game);
   } else {
@@ -844,6 +988,10 @@ async function callAction() {
       players: game.players,
       pot: game.pot,
       currentPlayerIndex: nextIdx,
+      // Clear any active time call when a player acts
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   }
 }
@@ -904,6 +1052,11 @@ async function raiseAction(amount) {
     currentBet: game.currentBet,
     lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
     currentPlayerIndex: nextIdx,
+    // Clear any active time call when a player acts to prevent the
+    // countdown from persisting into the next player's turn or next hand.
+    timeCallStart: null,
+    timeCallTarget: null,
+    timeCallDuration: null,
   });
 }
 
@@ -938,6 +1091,10 @@ async function foldAction() {
       pot: game.pot,
       phase: game.phase,
       outcomeMessage: game.outcomeMessage,
+      // Clear any active time call when a player folds and a hand ends.
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
     return;
   }
@@ -960,6 +1117,10 @@ async function foldAction() {
       players: game.players,
       currentPlayerIndex: nextIdx,
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
+      // Clear any active time call when a player folds to avoid lingering timers
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   }
 }
@@ -995,6 +1156,11 @@ async function advanceRound(game) {
       // specifying this, the pot persists implicitly, but including it
       // ensures clarity and consistency across updates.
       pot: game.pot,
+      // Reset any time call metadata when starting a new round to
+      // ensure no timer persists from the previous betting round.
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   } else if (game.bettingRound === 1) {
     const deck = game.deck;
@@ -1017,6 +1183,10 @@ async function advanceRound(game) {
       lastAggressivePlayerIndex: game.lastAggressivePlayerIndex,
       currentPlayerIndex: game.currentPlayerIndex,
       pot: game.pot,
+      // Reset any time call metadata when starting a new round
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   } else if (game.bettingRound === 2) {
     game.phase = 'sniping';
@@ -1027,6 +1197,10 @@ async function advanceRound(game) {
       phase: game.phase,
       snipingIndex: game.snipingIndex,
       snipingStartIndex: game.snipingStartIndex,
+      // Reset any time call metadata when entering the sniping phase
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   }
 }
@@ -1063,6 +1237,15 @@ async function submitSnipe(snipe) {
         });
       }
     }
+  } else {
+    // When an empty or invalid snipe is provided, record a forfeited
+    // declaration.  This allows the snipes display to show that the
+    // player declined to snipe or ran out of time.
+    snipes.push({
+      by: myPlayerId,
+      name: myName,
+      none: true,
+    });
   }
   let nextIdx = nextActiveIndex(game.players, game.snipingIndex);
   if (nextIdx === game.snipingStartIndex) {
@@ -1114,38 +1297,76 @@ async function resolveShowdown(game, snipes) {
       if (typeof s === 'string') {
         return `5-card hand ${s}`;
       }
-      const cat = s.category;
-      const val = s.value;
+      // For forfeited snipes or selections with no combination/card, show a
+      // simple message.
+      if (!s.category || !s.value || s.none) {
+        return `No snipe declared by ${s.name}`;
+      }
       let desc;
-      switch (cat) {
+      switch (s.category) {
         case 7:
-          desc = `Four of a Kind (${val})`;
+          desc = `Four of a Kind (${s.value})`;
           break;
         case 6:
-          desc = `Full House (trip ${val})`;
+          desc = `Full House (trip ${s.value})`;
           break;
         case 5:
-          desc = `Straight to ${val}`;
+          desc = `Straight to ${s.value}`;
           break;
         case 4:
-          desc = `Three of a Kind (${val})`;
+          desc = `Three of a Kind (${s.value})`;
           break;
         case 3:
-          desc = `Two Pair (highest ${val})`;
+          desc = `Two Pair (highest ${s.value})`;
           break;
         case 2:
-          desc = `Pair of ${val}s`;
+          desc = `Pair of ${s.value}s`;
           break;
         default:
-          desc = `High Card ${val}`;
+          desc = `High Card ${s.value}`;
           break;
       }
       return `${desc} by ${s.name}`;
     }).filter(Boolean);
     if (descs.length > 0) {
-      snipeSummary = ' Sniped: ' + descs.join(', ') + '.';
+      snipeSummary = ' Snipes: ' + descs.join('; ') + '.';
     }
   }
+  // Determine kicker information before constructing the outcome string.
+  // When multiple players have the same ranked combination category, the
+  // tie can be broken by comparing kicker values. Identify any
+  // opponents with the same category but a lower rank and determine
+  // which kicker positions decided the winner. Only mention kickers when
+  // they affected the outcome.
+  let kickerInfo = '';
+  try {
+    if (bestRank && Array.isArray(bestRank)) {
+      const sameCategoryOpponents = results.filter(res => res.rank && res.rank[0] === bestRank[0] && compareRanks(res.rank, bestRank) < 0);
+      if (sameCategoryOpponents.length > 0) {
+        const diffPositions = [];
+        sameCategoryOpponents.forEach(res => {
+          for (let i = 1; i < bestRank.length; i++) {
+            const av = bestRank[i] || 0;
+            const bv = res.rank[i] || 0;
+            if (av !== bv) {
+              diffPositions.push(i);
+              break;
+            }
+          }
+        });
+        const uniquePositions = [...new Set(diffPositions)];
+        const kickerVals = uniquePositions.map(pos => bestRank[pos]).filter(v => v !== undefined);
+        if (kickerVals.length > 0) {
+          const kickerText = kickerVals.length > 1 ? kickerVals.join(' and ') : kickerVals[0];
+          kickerInfo = ` Winning kicker${kickerVals.length > 1 ? 's' : ''}: ${kickerText}.`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error computing kicker information:', err);
+  }
+
+  // Construct the winning combination description.
   let winningDesc = '';
   if (bestRank && bestRank[0] > 0) {
     const cat = bestRank[0];
@@ -1175,7 +1396,9 @@ async function resolveShowdown(game, snipes) {
     }
     winningDesc = ' Winning combination: ' + winningDesc + '.';
   }
-  outcome = outcome + snipeSummary + winningDesc;
+  // Now append the snipe summary, winning description and any kicker information to the outcome.
+  outcome = outcome + snipeSummary + winningDesc + kickerInfo;
+
   game.pot = 0;
   const updatedPlayers = game.players.map(p => {
     const res = winners.find(w => w.player.id === p.id);
@@ -1203,10 +1426,18 @@ async function resolveShowdown(game, snipes) {
     phase: 'finished',
     outcomeMessage: outcome,
     gameOver: gameOver,
+    // Clear any active time call metadata when the hand concludes.
+    timeCallStart: null,
+    timeCallTarget: null,
+    timeCallDuration: null,
   });
   if (gameOver && overallWinner) {
     await updateDoc(docRef, {
       outcomeMessage: `${overallWinner.name} has reached 75 chips and wins the game!`,
+      // Ensure any lingering time call metadata is cleared when the game finishes
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
     });
   }
 }
@@ -1224,6 +1455,15 @@ raiseBtn.addEventListener('click', () => {
 foldBtn.addEventListener('click', () => {
   foldAction();
 });
+
+// When visible, the call time button lets players call a timer on another
+// player who is taking too long.  The actual logic for this button is
+// defined in callTimeAction().
+if (callTimeBtn) {
+  callTimeBtn.addEventListener('click', () => {
+    callTimeAction();
+  });
+}
 
 // Handle create game
 createGameBtn.addEventListener('click', async () => {
