@@ -1575,8 +1575,8 @@ joinGameBtn.addEventListener('click', async () => {
     return;
   }
   const game = snap.data();
-  if (game.players.length >= 10) {
-    lobbyStatus.textContent = 'Game is full (max 10 players).';
+  if (game.players.length >= 9) {
+    lobbyStatus.textContent = 'Game is full (max 9 players).';
     return;
   }
   // When joining, always add the new player as an active participant.  Even
