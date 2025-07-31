@@ -107,22 +107,22 @@ function shuffle(array) {
 }
 
 // Utility: calculate seat coordinates around an oval table.
-// Returns an array of {x, y} objects where x and y are percentages (0-100).
-// Players are spaced evenly around the ellipse with the bottom seat first and
-// proceeding clockwise.  This function supports up to 9 players.
+// Returns an array of { x, y } in percentage units (0–100).
+// Seat 0 is at the bottom-center. Seats increase CLOCKWISE.
 function getSeatPositions(numPlayers) {
   const positions = [];
-  // Limit number of seats to at least 2 and maximum 9
-  const count = Math.max(2, Math.min(numPlayers, 9));
-  // Choose a starting angle at +90 degrees (bottom) so the first seat is at
-  // the top of the table. Seats then proceed clockwise around the circle.
+  const count = Math.max(2, Math.min(numPlayers, 9)); // clamp to [2, 9]
+
+  // Ellipse radii (% of the container). Tune as needed.
+  const xRadius = 40; // horizontal radius
+  const yRadius = 28; // vertical radius
+
+  const startDeg = 90;            // 90° => bottom (because screen y grows downward)
+  const stepDeg  = 360 / count;   // equal angular spacing
+
   for (let i = 0; i < count; i++) {
-    const angleDeg = 90 + (360 * i / count);
+    const angleDeg = startDeg - i * stepDeg; // subtract => CLOCKWISE
     const angleRad = angleDeg * Math.PI / 180;
-    // The x-radius and y-radius percentages determine how far from center
-    // the seats are placed.  Adjust these values to tweak the oval shape.
-    const xRadius = 40;    // horizontal radius in percentage of table width
-    const yRadius = 28;    // vertical radius in percentage of table height
     const x = 50 + xRadius * Math.cos(angleRad);
     const y = 50 + yRadius * Math.sin(angleRad);
     positions.push({ x, y });
