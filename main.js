@@ -121,7 +121,7 @@ function getSeatPositions(numPlayers) {
   const stepDeg  = 360 / count;   // equal angular spacing
 
   for (let i = 0; i < count; i++) {
-    const angleDeg = startDeg - i * stepDeg; // subtract => CLOCKWISE
+    const angleDeg = startDeg + i * stepDeg; // subtract => CLOCKWISE
     const angleRad = angleDeg * Math.PI / 180;
     const x = 50 + xRadius * Math.cos(angleRad);
     const y = 50 + yRadius * Math.sin(angleRad);
