@@ -96,24 +96,28 @@ function generateGameCode() {
 
 // Utility: shuffle an array in place (Fisher–Yates)
 function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+  const n = array.length;
+  const uint32 = window.crypto.getRandomValues(new Uint32Array(n));
+
+  for (let i = n - 1; i > 0; i--) {
+    // uint32[i] may be > i, so we scale it down fairly
+    let j = uint32[i] % (i + 1);
     [array[i], array[j]] = [array[j], array[i]];
   }
 }
 
 // Utility: calculate seat coordinates around an oval table.
 // Returns an array of {x, y} objects where x and y are percentages (0-100).
-// Players are spaced evenly around the ellipse with the top seat first and
+// Players are spaced evenly around the ellipse with the bottom seat first and
 // proceeding clockwise.  This function supports up to 9 players.
 function getSeatPositions(numPlayers) {
   const positions = [];
   // Limit number of seats to at least 2 and maximum 9
   const count = Math.max(2, Math.min(numPlayers, 9));
-  // Choose a starting angle at -90 degrees (top) so the first seat is at
+  // Choose a starting angle at +90 degrees (bottom) so the first seat is at
   // the top of the table. Seats then proceed clockwise around the circle.
   for (let i = 0; i < count; i++) {
-    const angleDeg = -90 + (360 * i / count);
+    const angleDeg = 90 + (360 * i / count);
     const angleRad = angleDeg * Math.PI / 180;
     // The x-radius and y-radius percentages determine how far from center
     // the seats are placed.  Adjust these values to tweak the oval shape.
