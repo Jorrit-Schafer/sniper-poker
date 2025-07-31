@@ -504,13 +504,12 @@ function renderGame(game) {
     const oldSeats = tableEl.querySelectorAll('.player-seat');
     oldSeats.forEach(el => el.remove());
     const positions = getSeatPositions(game.players.length);
-    // Determine a rotation shift so that the current user is always
-    // rendered at the bottom of the table. The bottom seat index is
-    // calculated as the halfway point around the circle (floor(numPlayers/2)).
+    // Determine a rotation shift so the current user is at the bottom.
+    // getSeatPositions() makes seat 0 the bottom; keep others clockwise.
     const nSeats = game.players.length;
     const myIndexLocal = game.players.findIndex(p => p.id === myPlayerId);
-    const bottomIdx = Math.floor(nSeats / 2);
-    const shift = ((bottomIdx - myIndexLocal) % nSeats + nSeats) % nSeats;
+    // Map my player -> seat 0 (bottom). Guard for -1 just in case.
+    const shift = (nSeats - (myIndexLocal >= 0 ? myIndexLocal : 0)) % nSeats;
     game.players.forEach((p, idx) => {
       const seat = document.createElement('div');
       seat.className = 'player-seat';
