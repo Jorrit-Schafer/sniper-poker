@@ -1,5 +1,5 @@
 /*
- * Sniper Hold'em client logic (merged fixes)
+ * Sniper Poker client logic (merged fixes)
  *
  * This file consolidates all of the improvements made during debugging. It
  * replaces the previous `main (4).js` with a clean filename and includes:
