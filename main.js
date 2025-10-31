@@ -1440,18 +1440,36 @@ async function resolveShowdown(game, snipes) {
       p.eliminated = true;
     }
   });
+  let gameOver = false;
+  let overallWinner = null;
+  updatedPlayers.forEach(p => {
+    if (p.chips >= 75) {
+      gameOver = true;
+      overallWinner = p;
+    }
+  });
   await updateDoc(docRef, {
     players: updatedPlayers,
     pot: game.pot,
     phase: 'finished',
     outcomeMessage: outcome,
-    gameOver: false, // keep playing; startHand() will end the game when only one remains
+    gameOver: gameOver,
     // Clear any active time call metadata when the hand concludes.
     timeCallStart: null,
     timeCallTarget: null,
     timeCallDuration: null,
   });
-  
+  if (gameOver && overallWinner) {
+    await updateDoc(docRef, {
+      outcomeMessage: `${overallWinner.name} has reached 75 chips and wins the game!`,
+      // Ensure any lingering time call metadata is cleared when the game finishes
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
+    });
+  }
+}
+
 // Wire up UI buttons
 callBtn.addEventListener('click', () => {
   callAction();
