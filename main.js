@@ -732,31 +732,55 @@ async function advanceRound(game) {
 
 async function submitSnipe(value) {
   const docRef = doc(db, 'games', currentGameId);
-  const snap = await getDoc(docRef); const game = snap.data();
-  if (game.phase !== 'sniping') return;
-  if (!Array.isArray(game.snipes)) game.snipes = [];
-  const idx = game.snipingIndex; const player = game.players[idx];
-  if (player.id !== myPlayerId) return;
-  const snipeVal = (value === '' || value === null || value === undefined)
-    ? { none: true, name: player.name }
-    : (typeof value === 'object' ? { ...value, name: player.name } : value);
+  const snap = await getDoc(docRef);
+  const game = snap.data();
+  if (!game || game.phase !== 'sniping') return;
 
+  // Ensure snipes array exists and matches player count
+  if (!Array.isArray(game.snipes)) game.snipes = Array(game.players.length).fill(null);
+
+  const idx = game.snipingIndex;
+  const player = game.players[idx];
+  if (!player || player.id !== myPlayerId) return;
+
+  // Normalize what’s being stored
+  const snipeVal =
+    value === '' || value === null || value === undefined
+      ? { none: true, name: player.name }
+      : typeof value === 'object'
+        ? { ...value, name: player.name }
+        : value;
+
+  // Store this player's snipe
   game.snipes[idx] = snipeVal;
 
-  // move to next snipe
+  // Advance to next eligible (non-folded, non-eliminated) player
   let nextIdx = idx;
   const n = game.players.length;
-  for (let step = 0; step < n - 1; step++) {
+  for (let i = 0; i < n; i++) {
     nextIdx = (nextIdx + 1) % n;
-    const p = game.players[nextIdx];
-    if (!p.folded && !p.eliminated) break;
+    const nextP = game.players[nextIdx];
+    if (!nextP.folded && !nextP.eliminated) break;
   }
+
+  // If we've looped back to the start → everyone’s declared → showdown
   if (nextIdx === game.snipingStartIndex) {
-    // Sniping complete -> showdown
-    await updateDoc(docRef, { snipes: game.snipes, phase: 'showdown', timeCallStart: null, timeCallTarget: null, timeCallDuration: null });
+    await updateDoc(docRef, {
+      snipes: game.snipes,
+      phase: 'showdown',
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
+    });
     await resolveShowdown();
   } else {
-    await updateDoc(docRef, { snipes: game.snipes, snipingIndex: nextIdx, timeCallStart: null, timeCallTarget: null, timeCallDuration: null });
+    await updateDoc(docRef, {
+      snipes: game.snipes,
+      snipingIndex: nextIdx,
+      timeCallStart: null,
+      timeCallTarget: null,
+      timeCallDuration: null,
+    });
   }
 }
 
