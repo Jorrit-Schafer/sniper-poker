@@ -1443,7 +1443,7 @@ async function resolveShowdown(game, snipes) {
   let gameOver = false;
   let overallWinner = null;
   updatedPlayers.forEach(p => {
-    if (p.chips >= 75) {
+    if (p.chips >= 9999) {
       gameOver = true;
       overallWinner = p;
     }
